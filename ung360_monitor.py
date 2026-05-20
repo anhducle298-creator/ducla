@@ -10,6 +10,7 @@ import json
 import sqlite3
 import unicodedata
 import threading
+import subprocess
 from datetime import datetime, timedelta
 import telebot
 
@@ -1038,7 +1039,20 @@ def restart_monitor_after_reply(chat_id):
                 "chat_id": chat_id,
                 "requested_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }, f, ensure_ascii=False)
-        os.execv(sys.executable, [sys.executable] + sys.argv)
+
+        script_path = os.path.abspath(sys.argv[0] or __file__)
+        args = [sys.executable, script_path] + sys.argv[1:]
+        creationflags = 0
+        if os.name == "nt":
+            creationflags = subprocess.CREATE_NEW_PROCESS_GROUP
+
+        subprocess.Popen(
+            args,
+            cwd=os.getcwd(),
+            close_fds=True,
+            creationflags=creationflags,
+        )
+        os._exit(0)
     except Exception as e:
         write_error_log(f"Restart monitor failed: {e}")
         bot.send_message(chat_id, f"Restart thất bại: {e}")
