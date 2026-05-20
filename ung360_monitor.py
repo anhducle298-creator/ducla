@@ -52,6 +52,10 @@ LOI_GUI_ALERT = 5000
 
 GD_LOI_ALERT = 500
 THIET_HAI_ALERT = 10_000_000
+GD_LOI_BASELINE_DAYS = 7
+GD_LOI_BASELINE_MIN_DAYS = 3
+GD_LOI_BASELINE_MULTIPLIER = 1.3
+GD_LOI_DAILY_END_HOUR = 20
 
 BASELINE_CODES = {
     "7": 500,
@@ -2080,6 +2084,181 @@ def get_last_same_period_data():
         return dict(row)
 
     return None
+
+
+def parse_datetime_text(value):
+    value = (value or "").strip()
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%d/%m/%Y %H:%M"):
+        try:
+            return datetime.strptime(value, fmt)
+        except Exception:
+            pass
+    return None
+
+
+def get_gd_loi_report_datetime(body):
+    period_match = re.search(
+        r'(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}).{0,20}?(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})',
+        body,
+        re.DOTALL
+    )
+    if period_match:
+        return parse_datetime_text(period_match.group(2))
+
+    time_match = re.search(r'GD loi\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})', body, re.IGNORECASE)
+    if time_match:
+        return parse_datetime_text(time_match.group(1))
+
+    time_match = re.search(r'(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})', body)
+    if time_match:
+        return parse_datetime_text(time_match.group(1))
+
+    time_match = re.search(r'(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2})', body)
+    if time_match:
+        return parse_datetime_text(time_match.group(1))
+
+    return None
+
+
+def get_gd_loi_daily_baseline(exclude_date, max_days=GD_LOI_BASELINE_DAYS):
+    if not os.path.exists(DB_PATH):
+        return {"days": 0, "avg_errors": 0, "avg_damage": 0, "daily": []}
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT report_time, total_errors, damage_vnd
+        FROM gd_loi_data
+        WHERE total_errors > 0
+          AND report_time IS NOT NULL
+          AND report_time != ''
+        ORDER BY report_time DESC, id DESC
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+
+    daily = {}
+    for row in rows:
+        report_dt = parse_datetime_text(row["report_time"])
+        if not report_dt:
+            continue
+
+        day = report_dt.strftime("%Y-%m-%d")
+        if day == exclude_date:
+            continue
+
+        current = daily.get(day)
+        candidate = {
+            "date": day,
+            "report_time": report_dt,
+            "total_errors": int(row["total_errors"] or 0),
+            "damage_vnd": int(row["damage_vnd"] or 0),
+        }
+        if current is None or (
+            candidate["report_time"],
+            candidate["total_errors"],
+        ) > (
+            current["report_time"],
+            current["total_errors"],
+        ):
+            daily[day] = candidate
+
+    log_folder = "logs/gd_loi"
+    if len(daily) < GD_LOI_BASELINE_MIN_DAYS and os.path.exists(log_folder):
+        for filename in os.listdir(log_folder):
+            if not filename.endswith(".log"):
+                continue
+
+            path = os.path.join(log_folder, filename)
+            try:
+                with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                    content = f.read()
+            except Exception:
+                continue
+
+            for block in content.split("=" * 70):
+                if not block.strip() or "TEST GD LOI" in block or "TEST ALERT" in block:
+                    continue
+
+                candidates = []
+
+                alert_match = re.search(r'\[UNG360-ALERT\]\s*(\d{2})/(\d{2})\s+(\d{2}:\d{2})', block)
+                total_match = re.search(r'T\S*ng:\s*([\d,.]+)\s*l', block, re.IGNORECASE)
+                if alert_match and total_match:
+                    day_text = f"{datetime.now().year}-{alert_match.group(2)}-{alert_match.group(1)}"
+                    candidates.append((day_text, alert_match.group(3), to_int(total_match.group(1))))
+
+                gd_match = re.search(r'GD loi\s+(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}):\d{2}', block, re.IGNORECASE)
+                if gd_match:
+                    ung_total = sum(to_int(value) for value in re.findall(r'\bUNG:\s*([\d,.]+)\s*loi', block, re.IGNORECASE))
+                    hoan_total = sum(to_int(value) for value in re.findall(r'\bHOANUNG:\s*([\d,.]+)\s*loi', block, re.IGNORECASE))
+                    if ung_total or hoan_total:
+                        candidates.append((gd_match.group(1), gd_match.group(2), ung_total + hoan_total))
+
+                period_match = re.search(
+                    r'(\d{4}-\d{2}-\d{2})\s+00:00:00.{0,80}?(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}):\d{2}',
+                    block,
+                    re.DOTALL
+                )
+                total_report_match = re.search(r'T\S*ng\s+s\S*\s+l\S*i\s+([\d,.]+)\s+giao', block, re.IGNORECASE)
+                if period_match and total_report_match:
+                    candidates.append((period_match.group(1), period_match.group(3), to_int(total_report_match.group(1))))
+
+                for day, hhmm, total_errors in candidates:
+                    if day == exclude_date or not total_errors:
+                        continue
+
+                    report_dt = parse_datetime_text(f"{day} {hhmm}:00")
+                    if not report_dt:
+                        continue
+
+                    current = daily.get(day)
+                    candidate = {
+                        "date": day,
+                        "report_time": report_dt,
+                        "total_errors": total_errors,
+                        "damage_vnd": 0,
+                    }
+                    if current is None or (
+                        candidate["report_time"],
+                        candidate["total_errors"],
+                    ) > (
+                        current["report_time"],
+                        current["total_errors"],
+                    ):
+                        daily[day] = candidate
+
+    all_daily_rows = sorted(daily.values(), key=lambda item: item["date"], reverse=True)
+    full_daily_rows = [
+        item for item in all_daily_rows
+        if item["report_time"].hour >= GD_LOI_DAILY_END_HOUR
+    ]
+    source_rows = full_daily_rows if len(full_daily_rows) >= GD_LOI_BASELINE_MIN_DAYS else all_daily_rows
+    daily_rows = source_rows[:max_days]
+    if not daily_rows:
+        return {"days": 0, "avg_errors": 0, "avg_damage": 0, "daily": []}
+
+    avg_errors = round(sum(item["total_errors"] for item in daily_rows) / len(daily_rows))
+    avg_damage = round(sum(item["damage_vnd"] for item in daily_rows) / len(daily_rows))
+    return {
+        "days": len(daily_rows),
+        "avg_errors": avg_errors,
+        "avg_damage": avg_damage,
+        "daily": daily_rows,
+    }
+
+
+def get_gd_loi_expected_threshold(avg_daily, report_dt):
+    if not avg_daily:
+        return 0, 0
+
+    end_minutes = GD_LOI_DAILY_END_HOUR * 60
+    elapsed_minutes = report_dt.hour * 60 + report_dt.minute
+    elapsed_minutes = min(max(elapsed_minutes, 1), end_minutes)
+    expected = round(avg_daily * elapsed_minutes / end_minutes)
+    threshold = max(GD_LOI_ALERT, round(expected * GD_LOI_BASELINE_MULTIPLIER))
+    return expected, threshold
     
 # ======================
 # PARSERS
@@ -2338,13 +2517,8 @@ def parse_gd_loi(body):
     for code, count in code_lines:
         code_map[code] = code_map.get(code, 0) + to_int(count)
 
-    report_time = ""
-    time_match = re.search(r'(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})', body)
-    if not time_match:
-        time_match = re.search(r'(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2})', body)
-
-    if time_match:
-        report_time = time_match.group(1)
+    report_dt = get_gd_loi_report_datetime(body)
+    report_time = report_dt.strftime("%Y-%m-%d %H:%M:%S") if report_dt else ""
 
     other_codes = {
         code: count
@@ -2366,12 +2540,38 @@ def parse_gd_loi(body):
     })
 
     reasons = []
+    baseline_lines = []
+    baseline = get_gd_loi_daily_baseline(report_dt.strftime("%Y-%m-%d") if report_dt else "")
 
-    if tong_loi >= GD_LOI_ALERT:
-        reasons.append(f"Tổng lỗi cao: {tong_loi:,}")
+    if report_dt and baseline["days"] >= GD_LOI_BASELINE_MIN_DAYS:
+        expected_errors, error_threshold = get_gd_loi_expected_threshold(baseline["avg_errors"], report_dt)
+        expected_damage, damage_threshold = get_gd_loi_expected_threshold(baseline["avg_damage"], report_dt)
+        baseline_lines.extend([
+            f"- TB {baseline['days']} ngay gan nhat: {baseline['avg_errors']:,} loi/ngay",
+            f"- Muc du kien tai {report_dt.strftime('%H:%M')}: {expected_errors:,} loi",
+            f"- Nguong canh bao: {error_threshold:,} loi",
+        ])
 
-    if thiet_hai >= THIET_HAI_ALERT:
-        reasons.append(f"Thiệt hại cao: {thiet_hai:,} VND")
+        if tong_loi > error_threshold:
+            reasons.append(
+                f"Tong loi vuot baseline: {tong_loi:,} > {error_threshold:,} "
+                f"(du kien {expected_errors:,})"
+            )
+
+        if thiet_hai > damage_threshold and thiet_hai >= THIET_HAI_ALERT:
+            reasons.append(
+                f"Thiet hai vuot baseline: {thiet_hai:,} > {damage_threshold:,} VND"
+            )
+    else:
+        baseline_lines.append(
+            f"- Chua du {GD_LOI_BASELINE_MIN_DAYS} ngay baseline, tam dung nguong cung."
+        )
+
+        if tong_loi >= GD_LOI_ALERT:
+            reasons.append(f"Tổng lỗi cao: {tong_loi:,}")
+
+        if thiet_hai >= THIET_HAI_ALERT:
+            reasons.append(f"Thiệt hại cao: {thiet_hai:,} VND")
 
     for code, count_int in code_map.items():
         if code in BASELINE_CODES:
@@ -2385,8 +2585,12 @@ def parse_gd_loi(body):
             if count_int >= OTHER_CODE_ALERT:
                 reasons.append(f"Code khác {code} cao: {count_int:,} GD")
 
-    title = "* UNG360 GD LỖI BẤT THƯỜNG" if reasons else "* UNG360 GD LỖI"
-    status = "CRITICAL" if reasons else "THEO DÕI"
+    if not reasons:
+        print("GD loi mail processed - within baseline")
+        return
+
+    title = "* UNG360 GD LỖI BẤT THƯỜNG"
+    status = "CRITICAL"
     
     display_time = ""
 
@@ -2415,6 +2619,10 @@ Trạng thái: {status}
         msg += "\nMã lỗi:\n"
         for code, count in sorted(code_map.items(), key=lambda x: x[1], reverse=True)[:10]:
             msg += format_result_code_count(code, count) + "\n"
+
+    if baseline_lines:
+        msg += "\nBaseline:\n"
+        msg += "\n".join(baseline_lines) + "\n"
 
     if reasons:
         msg += "\nLý do bất thường:\n"
