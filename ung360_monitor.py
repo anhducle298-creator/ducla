@@ -3234,7 +3234,7 @@ def parse_urgent_gd_alert(subject, body):
         window = "N/A"
 
     source_lines = re.findall(
-        r'-\s*([A-Z0-9_]+):\s*([\d,]+)\s*GD',
+        r'-\s*([A-Z_][A-Z0-9_]*):\s*([\d,]+)\s*GD',
         body
     )
 
@@ -3263,6 +3263,48 @@ Tổng lỗi: {total_error} GD / {window} phút
         msg += "\nMã lỗi:\n"
         for code, count in code_lines[:5]:
             msg += format_result_code_count(code, to_int(count)) + "\n"
+
+    analysis_lines = []
+    total_error_int = to_int(total_error) if total_error != "N/A" else 0
+    window_int = to_int(window) if window != "N/A" else 0
+
+    if total_error_int and window_int:
+        hourly_rate = round(total_error_int * 60 / window_int)
+        analysis_lines.append(
+            f"- Tốc độ lỗi: khoảng {hourly_rate:,} GD/giờ "
+            f"({total_error_int:,} GD/{window_int} phút)."
+        )
+
+        if total_error_int >= GD_LOI_ALERT:
+            analysis_lines.append(f"- Cửa sổ ngắn đã vượt ngưỡng tổng lỗi ngày ({GD_LOI_ALERT:,} GD), cần kiểm tra ngay.")
+        elif hourly_rate >= GD_LOI_ALERT:
+            analysis_lines.append(f"- Nếu tốc độ này kéo dài 1h sẽ vượt ngưỡng {GD_LOI_ALERT:,} GD.")
+
+    if source_lines:
+        source_counts = [(source, to_int(count)) for source, count in source_lines]
+        top_source, top_source_count = max(source_counts, key=lambda item: item[1])
+        if total_error_int:
+            top_source_pct = round(top_source_count * 100 / total_error_int)
+            analysis_lines.append(f"- Nguồn chính: {top_source} chiếm {top_source_pct}% ({top_source_count:,} GD).")
+        else:
+            analysis_lines.append(f"- Nguồn chính: {top_source} ({top_source_count:,} GD).")
+
+    if code_lines:
+        code_counts = [(code, to_int(count)) for code, count in code_lines]
+        top_code, top_code_count = max(code_counts, key=lambda item: item[1])
+        code_note = get_result_code_description(top_code)
+        if total_error_int:
+            top_code_pct = round(top_code_count * 100 / total_error_int)
+            line = f"- Mã lỗi chính: Code {top_code} chiếm {top_code_pct}% ({top_code_count:,} GD)"
+        else:
+            line = f"- Mã lỗi chính: Code {top_code} ({top_code_count:,} GD)"
+        if code_note:
+            line += f" - {code_note}"
+        analysis_lines.append(line + ".")
+
+    if analysis_lines:
+        msg += "\n=======\nPhân tích:\n"
+        msg += "\n".join(analysis_lines) + "\n"
 
     alert_key = f"urgent_gd_{display_time}_{total_error}_{window}_{hash(msg)}"
     send_alert_once(alert_key, msg)
