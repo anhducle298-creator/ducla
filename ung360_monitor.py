@@ -503,19 +503,34 @@ def get_device_event_log_text(limit=10):
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
+    per_device_limit = 5
     cursor.execute("""
         SELECT *
-        FROM device_events
-        ORDER BY id DESC
-        LIMIT ?
-    """, (limit,))
+        FROM (
+            SELECT
+                *,
+                ROW_NUMBER() OVER (
+                    PARTITION BY device_type, device_name, component_name, ip
+                    ORDER BY id DESC
+                ) AS rn
+            FROM device_events
+        )
+        WHERE rn <= ?
+        ORDER BY
+            device_type ASC,
+            device_name ASC,
+            component_name ASC,
+            ip ASC,
+            id DESC
+    """, (per_device_limit,))
     rows = cursor.fetchall()
     conn.close()
 
     if not rows:
         return "Chưa có log thiết bị."
 
-    lines = [f"* {limit} log thiết bị gần nhất"]
+    lines = [f"* Log thiết bị theo từng thiết bị ({per_device_limit} event gần nhất/thiết bị)"]
+    current_device = None
     for row in rows:
         name_parts = [row["device_type"], row["device_name"]]
         if row["component_name"]:
@@ -523,7 +538,13 @@ def get_device_event_log_text(limit=10):
         if row["ip"]:
             name_parts.append(row["ip"])
 
-        line = f"- {row['event_time']} | {' | '.join(name_parts)} | {row['event_type']}"
+        device_name = " | ".join(name_parts)
+        if device_name != current_device:
+            lines.append("")
+            lines.append(device_name)
+            current_device = device_name
+
+        line = f"- {row['event_time']} | {row['event_type']}"
         if row["downtime_minutes"] is not None:
             line += f" | Downtime: {row['downtime_minutes']} phút"
         if row["resource"]:
