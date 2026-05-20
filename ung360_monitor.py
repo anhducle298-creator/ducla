@@ -37,6 +37,7 @@ PROCESSED_FILE = "data/processed_mails.json"
 MONITOR_STARTED_AT = None
 received_periods = set()
 missing_alert_sent = set()
+sent_alert_keys = set()
 camera_pending = {}
 camera_alerted = {}
 aibox_pending = {}
@@ -264,6 +265,8 @@ def build_main_menu():
         telebot.types.KeyboardButton("Tổng lỗi hôm nay"),
         telebot.types.KeyboardButton("Thiết bị đang lỗi"),
         telebot.types.KeyboardButton("Log thiết bị"),
+        telebot.types.KeyboardButton("Cảnh báo gần nhất"),
+        telebot.types.KeyboardButton("Kafka gần nhất"),
         telebot.types.KeyboardButton("Trạng thái"),
         telebot.types.KeyboardButton("Bot còn chạy không"),
         telebot.types.KeyboardButton("Chat ID"),
@@ -491,6 +494,56 @@ def get_device_event_log_text(limit=10):
     return "\n".join(lines)
 
 
+def get_latest_log_entries(folder, limit=5):
+    if not os.path.exists(folder):
+        return []
+
+    log_files = sorted(
+        [os.path.join(folder, name) for name in os.listdir(folder) if name.endswith(".log")],
+        key=lambda path: os.path.getmtime(path),
+        reverse=True
+    )
+
+    entries = []
+    for logfile in log_files:
+        with open(logfile, "r", encoding="utf-8") as f:
+            parts = [part.strip() for part in f.read().split("=" * 70) if part.strip()]
+        entries.extend(reversed(parts))
+        if len(entries) >= limit:
+            break
+
+    return entries[:limit]
+
+
+def summarize_log_entry(entry, max_lines=8):
+    lines = [line.strip() for line in entry.splitlines() if line.strip()]
+    return "\n".join(lines[:max_lines])
+
+
+def get_recent_alerts_text(limit=5):
+    entries = [
+        entry for entry in get_latest_log_entries("logs/alert", limit + 5)
+        if "Ung360 monitor started" not in entry
+    ][:limit]
+    if not entries:
+        return "Chưa có log cảnh báo."
+
+    lines = [f"* {limit} cảnh báo gần nhất"]
+    for index, entry in enumerate(entries, 1):
+        lines.append("")
+        lines.append(f"{index}. {summarize_log_entry(entry, 7)}")
+
+    return "\n".join(lines)
+
+
+def get_latest_kafka_text():
+    entries = get_latest_log_entries("logs/kafka_monitoring", 1)
+    if not entries:
+        return "Chưa có log Kafka monitoring."
+
+    return "* Kafka gần nhất\n\n" + summarize_log_entry(entries[0], 12)
+
+
 @bot.message_handler(commands=["start", "help"])
 def handle_help(message):
     if not is_authorized_chat(message):
@@ -504,6 +557,8 @@ def handle_help(message):
         "/errors - Tổng lỗi từ đầu ngày và mã lỗi\n"
         "/devices - Thiết bị đang lỗi\n"
         "/devicelog - Log mất/kết nối lại thiết bị\n"
+        "/alerts - Cảnh báo gần nhất\n"
+        "/kafka - Kafka monitoring gần nhất\n"
         "/alive - Kiểm tra bot còn chạy không\n"
         "/chatid - Xem chat id hiện tại\n"
         "/help - Xem danh sách lệnh\n\n"
@@ -512,6 +567,8 @@ def handle_help(message):
         "tổng lỗi hôm nay\n"
         "thiết bị đang lỗi\n"
         "log thiết bị\n"
+        "cảnh báo gần nhất\n"
+        "kafka gần nhất\n"
         "bot còn chạy không\n"
         "id\n"
         "giúp tôi"
@@ -548,6 +605,22 @@ def handle_device_log(message):
         return
 
     send_bot_reply(message, get_device_event_log_text())
+
+
+@bot.message_handler(commands=["alerts"])
+def handle_recent_alerts(message):
+    if not is_authorized_chat(message):
+        return
+
+    send_bot_reply(message, get_recent_alerts_text())
+
+
+@bot.message_handler(commands=["kafka"])
+def handle_latest_kafka(message):
+    if not is_authorized_chat(message):
+        return
+
+    send_bot_reply(message, get_latest_kafka_text())
 
 
 @bot.message_handler(commands=["alive", "ping"])
@@ -625,6 +698,24 @@ def handle_unknown_message(message):
         return
 
     if text in {
+        "canh bao gan nhat",
+        "canh bao moi nhat",
+        "alert gan nhat",
+        "alerts",
+    }:
+        handle_recent_alerts(message)
+        return
+
+    if text in {
+        "kafka gan nhat",
+        "kafka moi nhat",
+        "kafka hien tai",
+        "kafka",
+    }:
+        handle_latest_kafka(message)
+        return
+
+    if text in {
         "alive",
         "ping",
         "bot con chay khong",
@@ -676,6 +767,16 @@ def to_int(value):
 def send_alert(message):
     bot.send_message(CHAT_ID, message)
     write_alert_log(message)
+
+
+def send_alert_once(alert_key, message):
+    if alert_key in sent_alert_keys:
+        print(f"Duplicate alert skipped: {alert_key}")
+        return False
+
+    sent_alert_keys.add(alert_key)
+    send_alert(message)
+    return True
 
 
 def write_named_log(folder, filename, body):
@@ -1803,7 +1904,8 @@ def parse_kpi_ung360(body):
             msg += "\n\n * Chỉ số không thay đổi:\n"
             msg += "\n".join(stale_lines)
 
-        send_alert(msg)
+        alert_key = f"kpi_{display_time}_{hash(msg)}"
+        send_alert_once(alert_key, msg)
     else:
         print("KPI mail processed - no alert")
         
@@ -1950,7 +2052,8 @@ Trạng thái: {status}
         for reason in reasons:
             msg += f"- {reason}\n"
 
-    send_alert(msg)
+    alert_key = f"gd_loi_{display_time}_{tong_loi}_{ung_loi}_{hoan_loi}_{thiet_hai}_{hash(str(code_map))}"
+    send_alert_once(alert_key, msg)
 
 
 def parse_ut360_scoring(body):
@@ -2243,7 +2346,8 @@ def parse_kafka_monitoring_mail(subject, body):
         msg += f"- TB 7 ngày cùng giờ: {average}\n"
         msg += f"- Chênh lệch: {diff}\n"
 
-    send_alert(msg)
+    alert_key = f"kafka_{display_time}_{hash(msg)}"
+    send_alert_once(alert_key, msg)
     print("Kafka monitoring alert sent")
     
 def parse_urgent_gd_alert(subject, body):
@@ -2294,7 +2398,8 @@ Tổng lỗi: {total_error} GD / {window} phút
         for code, count in code_lines[:5]:
             msg += format_result_code_count(code, to_int(count)) + "\n"
 
-    send_alert(msg)
+    alert_key = f"urgent_gd_{display_time}_{total_error}_{window}_{hash(msg)}"
+    send_alert_once(alert_key, msg)
 
 def get_body_field(body, label):
     label_norm = normalize_text(label)
@@ -2694,11 +2799,6 @@ def main():
     init_db()
     start_telegram_bot()
     processed = load_processed_mails()
-
-    try:
-        send_alert("------> Ung360 monitor started")
-    except Exception as e:
-        print("Telegram startup test failed:", e)
 
     while True:
         try:
