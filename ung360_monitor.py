@@ -398,6 +398,13 @@ def get_today_error_summary_text():
     if not rows:
         return f"Chưa có dữ liệu lỗi giao dịch hôm nay ({datetime.now().strftime('%d/%m')})."
 
+    latest_report_time = ""
+    for row in reversed(rows):
+        report_dt = parse_datetime_text(row["report_time"])
+        if report_dt:
+            latest_report_time = report_dt.strftime("%d/%m %H:%M")
+            break
+
     daily_rows = [
         row for row in rows
         if str(row["report_time"]).endswith("00:00:00") and int(row["total_errors"] or 0) > 0
@@ -431,12 +438,11 @@ def get_today_error_summary_text():
 
     lines = [
         f"* Tổng lỗi từ đầu ngày - {datetime.now().strftime('%d/%m %H:%M')}",
+        "Dữ liệu tính từ: 00:00 hôm nay",
+        f"Mốc báo cáo mới nhất: {latest_report_time or 'N/A'}",
         f"Tổng lỗi: {total_errors:,} GD",
         f"Số bản ghi đã đọc: {len(rows)}",
     ]
-
-    if base_row:
-        lines.append(f"Mốc tổng hợp: {base_row['report_time']}")
 
     if code_counts:
         lines.append("")
