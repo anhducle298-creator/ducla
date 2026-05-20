@@ -269,6 +269,7 @@ def build_main_menu():
         telebot.types.KeyboardButton("Kafka gần nhất"),
         telebot.types.KeyboardButton("Trạng thái"),
         telebot.types.KeyboardButton("Bot còn chạy không"),
+        telebot.types.KeyboardButton("Restart monitor"),
         telebot.types.KeyboardButton("Chat ID"),
         telebot.types.KeyboardButton("Trợ giúp"),
         telebot.types.KeyboardButton("Ẩn menu"),
@@ -560,6 +561,7 @@ def handle_help(message):
         "/alerts - Cảnh báo gần nhất\n"
         "/kafka - Kafka monitoring gần nhất\n"
         "/alive - Kiểm tra bot còn chạy không\n"
+        "/restart - Khởi động lại monitor\n"
         "/chatid - Xem chat id hiện tại\n"
         "/help - Xem danh sách lệnh\n\n"
         "Bạn cũng có thể nhắn tự nhiên:\n"
@@ -570,6 +572,7 @@ def handle_help(message):
         "cảnh báo gần nhất\n"
         "kafka gần nhất\n"
         "bot còn chạy không\n"
+        "restart monitor\n"
         "id\n"
         "giúp tôi"
     )
@@ -634,6 +637,29 @@ def handle_alive(message):
 @bot.message_handler(commands=["chatid"])
 def handle_chat_id(message):
     send_bot_reply(message, f"Chat ID của bạn: {message.chat.id}")
+
+
+def restart_monitor_after_reply(chat_id):
+    time.sleep(1)
+
+    try:
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+    except Exception as e:
+        write_error_log(f"Restart monitor failed: {e}")
+        bot.send_message(chat_id, f"Restart thất bại: {e}")
+
+
+@bot.message_handler(commands=["restart"])
+def handle_restart(message):
+    if not is_authorized_chat(message):
+        return
+
+    send_bot_reply(message, "Đang restart monitor...")
+    threading.Thread(
+        target=restart_monitor_after_reply,
+        args=(message.chat.id,),
+        daemon=True
+    ).start()
 
 
 @bot.message_handler(func=lambda message: True)
@@ -729,6 +755,17 @@ def handle_unknown_message(message):
 
     if text in {"id", "chat id", "chatid", "ma chat", "lay id"}:
         handle_chat_id(message)
+        return
+
+    if text in {
+        "restart",
+        "restart monitor",
+        "khoi dong lai",
+        "khoi dong lai monitor",
+        "chay lai",
+        "reset bot",
+    }:
+        handle_restart(message)
         return
 
     send_bot_reply(message, "Mình chưa hiểu lệnh này. Nhắn alo để mở menu lựa chọn.")
