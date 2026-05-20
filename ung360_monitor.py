@@ -263,6 +263,7 @@ def build_main_menu():
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(
         telebot.types.KeyboardButton("Tổng lỗi hôm nay"),
+        telebot.types.KeyboardButton("Phân tích tổng hợp"),
         telebot.types.KeyboardButton("Thiết bị đang lỗi"),
         telebot.types.KeyboardButton("Log thiết bị"),
         telebot.types.KeyboardButton("Cảnh báo gần nhất"),
@@ -545,6 +546,145 @@ def get_latest_kafka_text():
     return "* Kafka gần nhất\n\n" + summarize_log_entry(entries[0], 12)
 
 
+def format_number_delta(current, previous):
+    delta = int(current or 0) - int(previous or 0)
+    sign = "+" if delta > 0 else ""
+    return f"{int(current or 0):,} ({sign}{delta:,})"
+
+
+def format_percent_delta(current, previous):
+    delta = int(current or 0) - int(previous or 0)
+    sign = "+" if delta > 0 else ""
+    return f"{int(current or 0)}% ({sign}{delta} điểm)"
+
+
+def get_analysis_summary_text():
+    if not os.path.exists(DB_PATH):
+        return "Chưa có database để phân tích."
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT *
+        FROM kpi_data
+        ORDER BY id DESC
+        LIMIT 2
+    """)
+    kpi_rows = cursor.fetchall()
+
+    cursor.execute("""
+        SELECT *
+        FROM same_period_data
+        ORDER BY id DESC
+        LIMIT 1
+    """)
+    same_period_row = cursor.fetchone()
+
+    cursor.execute("""
+        SELECT *
+        FROM gd_loi_data
+        WHERE report_time LIKE ?
+        ORDER BY report_time ASC, id ASC
+    """, (today + "%",))
+    gd_rows = cursor.fetchall()
+
+    cursor.execute("""
+        SELECT status, COUNT(*) AS count
+        FROM devices
+        GROUP BY status
+        ORDER BY count DESC
+    """)
+    device_status_rows = cursor.fetchall()
+
+    cursor.execute("""
+        SELECT event_type, COUNT(*) AS count
+        FROM device_events
+        WHERE created_at LIKE ?
+        GROUP BY event_type
+        ORDER BY count DESC
+    """, (today + "%",))
+    device_event_rows = cursor.fetchall()
+
+    conn.close()
+
+    lines = [f"* Phân tích tổng hợp - {datetime.now().strftime('%d/%m %H:%M')}"]
+
+    if kpi_rows:
+        latest = kpi_rows[0]
+        previous = kpi_rows[1] if len(kpi_rows) > 1 else None
+        lines.extend(["", "KPI gần nhất:", f"- Kỳ: {latest['report_time']}"])
+
+        if previous:
+            lines.append(f"- Ung: {format_number_delta(latest['ung_value'], previous['ung_value'])} | {format_percent_delta(latest['ung_percent'], previous['ung_percent'])}")
+            lines.append(f"- Fee: {format_number_delta(latest['fee_value'], previous['fee_value'])} | {format_percent_delta(latest['fee_percent'], previous['fee_percent'])}")
+            lines.append(f"- Free: {format_number_delta(latest['free_value'], previous['free_value'])} | {format_percent_delta(latest['free_percent'], previous['free_percent'])}")
+            lines.append(f"- Gui Loi: {format_number_delta(latest['loi_gui'], previous['loi_gui'])}")
+        else:
+            lines.append(f"- Ung: {int(latest['ung_value'] or 0):,} | {int(latest['ung_percent'] or 0)}%")
+            lines.append(f"- Fee: {int(latest['fee_value'] or 0):,} | {int(latest['fee_percent'] or 0)}%")
+            lines.append(f"- Free: {int(latest['free_value'] or 0):,} | {int(latest['free_percent'] or 0)}%")
+            lines.append(f"- Gui Loi: {int(latest['loi_gui'] or 0):,}")
+    else:
+        lines.extend(["", "KPI gần nhất: chưa có dữ liệu."])
+
+    if same_period_row:
+        lines.extend([
+            "",
+            "Doanh thu cùng kỳ gần nhất:",
+            f"- Kỳ: {same_period_row['time_range']}",
+            f"- Ung: {int(same_period_row['ung_value'] or 0):,} | {int(same_period_row['ung_percent'] or 0)}%",
+            f"- Fee: {int(same_period_row['fee_value'] or 0):,} | {int(same_period_row['fee_percent'] or 0)}%",
+            f"- Free: {int(same_period_row['free_value'] or 0):,} | {int(same_period_row['free_percent'] or 0)}%",
+        ])
+
+    total_errors = 0
+    total_damage = 0
+    code_counts = {}
+    for row in gd_rows:
+        total_errors += int(row["total_errors"] or 0)
+        total_damage += int(row["damage_vnd"] or 0)
+        add_code_count(code_counts, "7", row["code_7"])
+        add_code_count(code_counts, "41", row["code_41"])
+        add_code_count(code_counts, "-1", row["code_minus_1"])
+        try:
+            for code, count in json.loads(row["other_codes"] or "{}").items():
+                add_code_count(code_counts, code, count)
+        except Exception:
+            pass
+
+    lines.extend([
+        "",
+        f"Lỗi giao dịch hôm nay: {total_errors:,} GD",
+        f"- Thiệt hại: {total_damage:,} VND",
+        f"- Số bản ghi: {len(gd_rows)}",
+    ])
+
+    if code_counts:
+        lines.append("- Top mã lỗi:")
+        for code, count in sorted(code_counts.items(), key=lambda item: item[1], reverse=True)[:5]:
+            description = get_result_code_description(code)
+            suffix = f" - {description}" if description else ""
+            lines.append(f"  {code}: {count:,} GD{suffix}")
+
+    problem_devices = sum(
+        int(row["count"] or 0)
+        for row in device_status_rows
+        if row["status"] != "OK"
+    )
+    lines.extend(["", f"Thiết bị đang lỗi: {problem_devices}"])
+    if device_status_rows:
+        status_text = ", ".join(f"{row['status']}: {row['count']}" for row in device_status_rows)
+        lines.append(f"- Trạng thái: {status_text}")
+    if device_event_rows:
+        event_text = ", ".join(f"{row['event_type']}: {row['count']}" for row in device_event_rows)
+        lines.append(f"- Event hôm nay: {event_text}")
+
+    return "\n".join(lines)
+
+
 @bot.message_handler(commands=["start", "help"])
 def handle_help(message):
     if not is_authorized_chat(message):
@@ -555,6 +695,7 @@ def handle_help(message):
         message,
         "Các lệnh đang hỗ trợ:\n"
         "/status - Xem trạng thái monitor\n"
+        "/analysis - Phân tích tổng hợp\n"
         "/errors - Tổng lỗi từ đầu ngày và mã lỗi\n"
         "/devices - Thiết bị đang lỗi\n"
         "/devicelog - Log mất/kết nối lại thiết bị\n"
@@ -566,6 +707,7 @@ def handle_help(message):
         "/help - Xem danh sách lệnh\n\n"
         "Bạn cũng có thể nhắn tự nhiên:\n"
         "trạng thái\n"
+        "phân tích tổng hợp\n"
         "tổng lỗi hôm nay\n"
         "thiết bị đang lỗi\n"
         "log thiết bị\n"
@@ -584,6 +726,14 @@ def handle_status(message):
         return
 
     send_bot_reply(message, get_monitor_status_text())
+
+
+@bot.message_handler(commands=["analysis", "phantich"])
+def handle_analysis(message):
+    if not is_authorized_chat(message):
+        return
+
+    send_bot_reply(message, get_analysis_summary_text())
 
 
 @bot.message_handler(commands=["errors", "loi"])
@@ -687,6 +837,17 @@ def handle_unknown_message(message):
 
     if text in {"status", "trang thai", "tinh trang", "kiem tra", "check", "monitor"}:
         handle_status(message)
+        return
+
+    if text in {
+        "phan tich",
+        "phan tich tong hop",
+        "phan tich hom nay",
+        "bao cao tong hop",
+        "tong hop",
+        "analysis",
+    }:
+        handle_analysis(message)
         return
 
     if text in {
