@@ -63,6 +63,165 @@ OTHER_CODE_ALERT = 10
 
 BLACKLIST_CHANGE_ALERT = 30000
 
+EVS_RESULT_CODE_DESCRIPTIONS = {
+    "-2": "Không lấy được thông tin của user",
+    "-1": "Thuê bao không tồn tại hoặc không hợp lệ",
+    "0": "Giao dịch thành công",
+    "1": "Yêu cầu không đúng định dạng",
+    "2": "IP không được phép truy cập",
+    "3": "Đối tác không tồn tại",
+    "4": "Đối tác chưa login hoặc chưa thành công",
+    "5": "Request Invalid Data",
+    "6": "Đối tác đã bị khóa",
+    "7": "Giao dịch thất bại. Lỗi ngoại lệ",
+    "9": "Session hết hiệu lực",
+    "10": "Session không hợp lệ",
+    "11": "Không được truy cập vào thời điểm hiện tại",
+    "12": "User chưa được phân quyền SOAP",
+    "13": "Vượt quá session tối đa cho phép",
+    "14": "Quá số kết nối cho phép",
+    "15": "Session chưa được tạo",
+    "16": "Quá số user login trong một thời điểm",
+    "17": "Không đúng initiator",
+    "18": "Session đã login thành công và còn hiệu lực",
+    "19": "Không đủ tham số",
+    "20": "Session chưa được login",
+    "21": "IP đẩy lệnh không đúng IP khi login session",
+    "25": "PIN nhập không đúng 6 ký tự số",
+    "29": "Kiểu tài khoản khác stock",
+    "30": "Target khác postpaid và airtime",
+    "31": "Số tiền/số lượng không hợp lệ",
+    "32": "Thuê bao đang trong trạng thái create",
+    "33": "Thuê bao đang trong trạng thái valid",
+    "34": "Thuê bao đang trong trạng thái deleted",
+    "35": "Thuê bao là thuê bao trả sau",
+    "36": "Thuê bao trả trước bị khóa chức năng nạp thẻ",
+    "37": "Thuê bao trả trước không bị khóa chức năng nạp thẻ",
+    "38": "Thuê bao trả trước gọi hàm trả sau",
+    "39": "Thuê bao trả sau gọi hàm trả trước",
+    "40": "Thuê bao bị khóa",
+    "41": "Thuê bao không đủ tiền để giao dịch",
+    "42": "View tài khoản IN thành công",
+    "43": "Thuê bao không đủ tiền để chuyển cho reseller",
+    "45": "View tài khoản IN không thành công",
+    "46": "Mã giao dịch không hợp lệ",
+    "47": "Profile thuê bao bị chặn nạp thẻ qua EVS",
+    "48": "Mã giao dịch ứng tiền không tồn tại trên hệ thống",
+    "49": "ID không phải là ID của giao dịch ứng tiền",
+    "50": "ID ứng tiền không thành công",
+    "51": "Mã giao dịch ứng tiền không phải của thuê bao gửi",
+    "52": "Số thuê bao nhận không hợp lệ hoặc không tồn tại",
+    "53": "Sai mã PIN của số thuê bao gửi",
+    "54": "Có nhiều hơn 1 tài khoản có MSISDN là thuê bao gửi",
+    "55": "Thuê bao gửi bị khóa chức năng thanh toán",
+    "56": "Số thuê bao gửi không tồn tại hoặc không hợp lệ",
+    "57": "Có nhiều hơn 1 tài khoản có MSISDN là thuê bao nhận",
+    "58": "Check opt không thành công",
+    "59": "Thông tin số gửi không đúng định dạng",
+    "60": "Mã ID đối tác gửi lên đã tồn tại",
+    "61": "Độ dài reference2 phải nhỏ hơn hoặc bằng 20",
+    "62": "Giao dịch hoàn ứng thất bại vì khách hàng đã trả hết nợ",
+    "63": "Tổng số tiền hoàn ứng vượt quá số tiền ứng + fee",
+    "64": "Số điện thoại không tồn tại hoặc không còn hiệu lực",
+    "65": "Không thể reset PIN/modify phone cho nhiều hơn 1 tài khoản",
+    "66": "Số thuê bao không thuộc quyền quản lý của user",
+    "67": "Truyền fee khác 0 khi chưa trả hết nợ gốc",
+    "68": "Truyền fee bằng 0 khi đã trả hết nợ gốc",
+    "69": "Không parse được XML từ response FastPay",
+    "70": "Không nhận được kết quả từ FastPay",
+    "71": "Số thuê bao EZ chưa đăng ký sử dụng chức năng này",
+    "72": "Số thuê bao bán không hợp lệ",
+    "73": "Số thuê bao bán không đúng",
+    "74": "Số thuê bao EZ đã tồn tại trên hệ thống",
+    "75": "Số thuê bao bán đã tồn tại trên hệ thống",
+    "76": "Số bán không thể là SIM EZ",
+    "77": "Số tiền thanh toán cước/ứng tiền vượt quá mức cho phép",
+    "78": "Số tiền thanh toán cước/ứng tiền nhỏ hơn mức cho phép",
+    "79": "Số lần ứng tiền chưa hoàn ứng 100% quá số lần cho phép",
+    "80": "Có ngoại lệ xảy ra khi xử lý request",
+    "81": "Số tiền fee tặng tiền không hợp lệ",
+    "82": "Số tiền tặng nhỏ hơn mức cho phép",
+    "83": "Số tiền tặng nhiều hơn mức cho phép",
+    "84": "Số tiền phí nhỏ hơn mức cho phép",
+    "85": "Số tiền phí nhiều hơn mức cho phép",
+    "86": "Số tiền phí nhiều hơn số tiền tặng",
+    "87": "Thuê bao không thuộc đầu số cho phép",
+    "88": "Truyền số tiền phí không đúng",
+    "89": "Số tiền chia sẻ nhiều hơn mức cho phép trong ngày",
+    "90": "Có ngoại lệ khi check điều kiện chia sẻ",
+    "91": "Số tiền chia sẻ không nằm trong mệnh giá cho phép",
+    "92": "Số lượng không hợp lệ",
+    "93": "Đơn giá mua phải nhỏ hơn đơn giá bán",
+    "94": "Số lượng nhỏ hơn mức cho phép",
+    "95": "Số lượng lớn hơn mức cho phép",
+    "96": "Đơn giá bán nhỏ hơn mức cho phép",
+    "97": "Đơn giá bán lớn hơn mức cho phép",
+    "98": "Hệ thống không hỗ trợ loại tài khoản",
+    "99": "User chưa được map với loại tài khoản phụ nào",
+    "100": "User chưa được map với tài khoản DSP nào",
+    "101": "Thuê bao trả sau bị khóa chức năng nạp thẻ",
+    "103": "Giao dịch trùng lặp với cùng username và MSISDN",
+    "1001": "Mandatory parameter missing",
+    "1002": "Invalid parameter length",
+    "1003": "Invalid parameter syntax",
+    "1004": "Other error in request",
+    "1071": "Amount not within range",
+    "1072": "Invalid date time format",
+    "1073": "Old and new PIN same",
+    "1074": "Invalid transaction ID",
+    "1075": "New PIN and confirm new PIN mismatch",
+    "1396": "PGS internal error",
+    "1403": "PMI no PM connection",
+    "1404": "PMI request timeout",
+    "1501": "EZI service busy",
+    "1502": "EZI response invalid",
+    "1503": "EZI no SCLogic connection",
+    "1504": "EZI request timeout",
+    "1505": "EZI bad data",
+    "1506": "EZI bad transaction ID",
+    "1507": "EZI bad MSISDN",
+    "1508": "EZI bad session ID",
+    "1509": "EZI bad amount",
+    "1510": "EZI bad login",
+    "1511": "EZI amount greater than VC balances",
+    "3500": "Partial success",
+    "3502": "PIN modification failure",
+    "3503": "Reseller locked",
+    "3504": "Reseller account not found",
+    "3505": "Insufficient credit",
+    "3506": "Subscriber busy",
+    "3507": "Destination subscriber busy",
+    "3508": "Error limit reached",
+    "3509": "Consecutive error limit reached",
+    "3510": "Wrong PIN",
+    "3511": "R2R to same account",
+    "3512": "Amount less than min allowed",
+    "3513": "Amount higher than max allowed",
+    "3514": "Invalid transaction",
+    "3515": "Originator validity expired",
+    "3516": "Destination validity expired",
+    "3517": "Originator PIN not enabled",
+    "3518": "Commission table problem",
+    "3519": "Configuration data problem",
+    "3520": "Unauthorized transaction in profile",
+    "3521": "Invalid level",
+    "3522": "Barred de-allocation",
+    "3523": "Parameter missing in XML/http request",
+    "3524": "Malformed request",
+    "3525": "NOK XML parse error",
+    "3526": "Malformed XML prolog",
+    "3527": "ICC subscriber in CREATED state",
+    "3528": "ICC subscriber in VALID state",
+    "3530": "ICC subscriber in BLOCK state",
+    "3531": "Scratch card recharge suspended",
+    "3532": "Reseller untick deallocation flag",
+    "3533": "Reseller B does not have sufficient credit",
+    "3534": "Reseller untick end user flag",
+    "3535": "R2R alloc wrong whitelist rule",
+    "3536": "R2R dealloc wrong whitelist rule",
+    "5000": "Connection timeout khi nhận reply",
+}
+
 missing_config = [
     name for name, value in {
         "UNG360_TELEGRAM_BOT_TOKEN": BOT_TOKEN,
@@ -163,6 +322,18 @@ def add_code_count(code_counts, code, value):
     code_counts[str(code)] = code_counts.get(str(code), 0) + int(value)
 
 
+def get_result_code_description(code):
+    return EVS_RESULT_CODE_DESCRIPTIONS.get(str(code).strip(), "")
+
+
+def format_result_code_count(code, count):
+    description = get_result_code_description(code)
+    line = f"- Code {code}: {count:,} GD"
+    if description:
+        line += f" - {description}"
+    return line
+
+
 def get_today_error_summary_text():
     if not os.path.exists(DB_PATH):
         return "Chưa có database để kiểm tra lỗi."
@@ -227,7 +398,7 @@ def get_today_error_summary_text():
         lines.append("")
         lines.append("Mã lỗi:")
         for code, count in sorted(code_counts.items(), key=lambda item: item[1], reverse=True):
-            lines.append(f"- Code {code}: {count:,} GD")
+            lines.append(format_result_code_count(code, count))
     else:
         lines.append("")
         lines.append("Chưa có số liệu mã lỗi.")
@@ -1421,7 +1592,7 @@ Trạng thái: {status}
     if code_map:
         msg += "\nMã lỗi:\n"
         for code, count in sorted(code_map.items(), key=lambda x: x[1], reverse=True)[:10]:
-            msg += f"- Code {code}: {count:,} GD\n"
+            msg += format_result_code_count(code, count) + "\n"
 
     if reasons:
         msg += "\nLý do bất thường:\n"
@@ -1770,7 +1941,7 @@ Tổng lỗi: {total_error} GD / {window} phút
     if code_lines:
         msg += "\nMã lỗi:\n"
         for code, count in code_lines[:5]:
-            msg += f"- Code {code}: {count} GD\n"
+            msg += format_result_code_count(code, to_int(count)) + "\n"
 
     send_alert(msg)
 
