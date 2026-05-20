@@ -672,21 +672,32 @@ def get_analysis_summary_text():
     gd_rows = cursor.fetchall()
 
     cursor.execute("""
-        SELECT status, COUNT(*) AS count
+        SELECT *
         FROM devices
-        GROUP BY status
-        ORDER BY count DESC
+        WHERE status != 'OK'
+        ORDER BY updated_at DESC
+        LIMIT 10
     """)
-    device_status_rows = cursor.fetchall()
+    problem_device_rows = cursor.fetchall()
 
     cursor.execute("""
-        SELECT event_type, COUNT(*) AS count
+        SELECT
+            device_type,
+            device_name,
+            component_name,
+            ip,
+            COUNT(*) AS down_count,
+            MIN(event_time) AS first_down_time,
+            MAX(event_time) AS last_down_time,
+            SUM(COALESCE(downtime_minutes, 0)) AS total_downtime
         FROM device_events
         WHERE created_at LIKE ?
-        GROUP BY event_type
-        ORDER BY count DESC
+          AND event_type IN ('DOWN', 'RESOURCE_ALERT')
+        GROUP BY device_type, device_name, component_name, ip
+        ORDER BY down_count DESC, last_down_time DESC
+        LIMIT 10
     """, (today + "%",))
-    device_event_rows = cursor.fetchall()
+    device_down_rows = cursor.fetchall()
 
     conn.close()
 
@@ -749,18 +760,40 @@ def get_analysis_summary_text():
             suffix = f" - {description}" if description else ""
             lines.append(f"  {code}: {count:,} GD{suffix}")
 
-    problem_devices = sum(
-        int(row["count"] or 0)
-        for row in device_status_rows
-        if row["status"] != "OK"
-    )
-    lines.extend(["", f"Thiết bị đang lỗi: {problem_devices}"])
-    if device_status_rows:
-        status_text = ", ".join(f"{row['status']}: {row['count']}" for row in device_status_rows)
-        lines.append(f"- Trạng thái: {status_text}")
-    if device_event_rows:
-        event_text = ", ".join(f"{row['event_type']}: {row['count']}" for row in device_event_rows)
-        lines.append(f"- Event hôm nay: {event_text}")
+    lines.extend(["", f"Thiết bị đang lỗi: {len(problem_device_rows)}"])
+    if problem_device_rows:
+        for row in problem_device_rows:
+            name_parts = [row["device_type"], row["device_name"]]
+            if row["component_name"]:
+                name_parts.append(row["component_name"])
+            if row["ip"]:
+                name_parts.append(row["ip"])
+            line = f"- {' | '.join(name_parts)}"
+            if row["last_event_time"]:
+                line += f" | lỗi từ {row['last_event_time']}"
+            if row["last_downtime_minutes"] is not None:
+                line += f" | downtime {row['last_downtime_minutes']} phút"
+            lines.append(line)
+
+    if device_down_rows:
+        lines.append("Event lỗi hôm nay:")
+        for row in device_down_rows:
+            name_parts = [row["device_type"], row["device_name"]]
+            if row["component_name"]:
+                name_parts.append(row["component_name"])
+            if row["ip"]:
+                name_parts.append(row["ip"])
+            line = (
+                f"- {' | '.join(name_parts)}: "
+                f"{int(row['down_count'] or 0)} lần"
+            )
+            if row["first_down_time"]:
+                line += f" | từ {row['first_down_time']}"
+            if row["last_down_time"] and row["last_down_time"] != row["first_down_time"]:
+                line += f" -> {row['last_down_time']}"
+            if row["total_downtime"]:
+                line += f" | downtime {int(row['total_downtime'] or 0)} phút"
+            lines.append(line)
 
     return "\n".join(lines)
 
