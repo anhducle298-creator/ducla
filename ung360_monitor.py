@@ -686,18 +686,20 @@ def get_analysis_summary_text():
             device_name,
             component_name,
             ip,
-            COUNT(*) AS down_count,
-            MIN(event_time) AS first_down_time,
-            MAX(event_time) AS last_down_time,
-            SUM(COALESCE(downtime_minutes, 0)) AS total_downtime
+            event_time,
+            downtime_minutes
         FROM device_events
         WHERE created_at LIKE ?
           AND event_type IN ('DOWN', 'RESOURCE_ALERT')
-        GROUP BY device_type, device_name, component_name, ip
-        ORDER BY down_count DESC, last_down_time DESC
-        LIMIT 10
+        ORDER BY
+            device_type ASC,
+            device_name ASC,
+            component_name ASC,
+            ip ASC,
+            event_time ASC,
+            id ASC
     """, (today + "%",))
-    device_down_rows = cursor.fetchall()
+    device_down_event_rows = cursor.fetchall()
 
     conn.close()
 
@@ -770,30 +772,49 @@ def get_analysis_summary_text():
                 name_parts.append(row["ip"])
             line = f"- {' | '.join(name_parts)}"
             if row["last_event_time"]:
-                line += f" | lỗi từ {row['last_event_time']}"
+                line += f" | lỗi từ {format_time_hhmm(row['last_event_time'])}"
             if row["last_downtime_minutes"] is not None:
                 line += f" | downtime {row['last_downtime_minutes']} phút"
             lines.append(line)
 
-    if device_down_rows:
+    if device_down_event_rows:
+        device_down_map = {}
+        for row in device_down_event_rows:
+            key = (
+                row["device_type"],
+                row["device_name"],
+                row["component_name"] or "",
+                row["ip"] or "",
+            )
+            event_key = (row["event_time"], row["downtime_minutes"])
+            event_list = device_down_map.setdefault(key, [])
+            if not any((item["event_time"], item["downtime_minutes"]) == event_key for item in event_list):
+                event_list.append(row)
+
         lines.append("Event lỗi hôm nay:")
-        for row in device_down_rows:
-            name_parts = [row["device_type"], row["device_name"]]
-            if row["component_name"]:
-                name_parts.append(row["component_name"])
-            if row["ip"]:
-                name_parts.append(row["ip"])
+        for key, events in device_down_map.items():
+            device_type, device_name, component_name, ip = key
+            name_parts = [device_type, device_name]
+            if component_name:
+                name_parts.append(component_name)
+            if ip:
+                name_parts.append(ip)
+
+            total_downtime = sum(int(row["downtime_minutes"] or 0) for row in events)
             line = (
                 f"- {' | '.join(name_parts)}: "
-                f"{int(row['down_count'] or 0)} lần"
+                f"{len(events)} lần"
             )
-            if row["first_down_time"]:
-                line += f" | từ {row['first_down_time']}"
-            if row["last_down_time"] and row["last_down_time"] != row["first_down_time"]:
-                line += f" -> {row['last_down_time']}"
-            if row["total_downtime"]:
-                line += f" | downtime {int(row['total_downtime'] or 0)} phút"
+            if total_downtime:
+                line += f" | downtime {total_downtime} phút"
             lines.append(line)
+
+            for index, event in enumerate(events, 1):
+                event_time = format_time_hhmm(event["event_time"])
+                event_line = f"  {index}. {event_time}"
+                if event["downtime_minutes"] is not None:
+                    event_line += f" | downtime {int(event['downtime_minutes'] or 0)} phút"
+                lines.append(event_line)
 
     return "\n".join(lines)
 
@@ -2253,6 +2274,11 @@ def parse_datetime_text(value):
         except Exception:
             pass
     return None
+
+
+def format_time_hhmm(value):
+    dt = parse_datetime_text(value)
+    return dt.strftime("%H:%M") if dt else str(value or "")
 
 
 def get_gd_loi_report_datetime(body):
