@@ -613,13 +613,13 @@ def get_latest_kafka_text():
 def format_number_delta(current, previous):
     delta = int(current or 0) - int(previous or 0)
     sign = "+" if delta > 0 else ""
-    return f"{int(current or 0):,} ({sign}{delta:,})"
+    return f"{int(current or 0):,} (1h {sign}{delta:,})"
 
 
 def format_percent_delta(current, previous):
     delta = int(current or 0) - int(previous or 0)
     sign = "+" if delta > 0 else ""
-    return f"{int(current or 0)}% ({sign}{delta} điểm)"
+    return f"1d {int(current or 0)}% (1h {sign}{delta}%)"
 
 
 def get_analysis_summary_text():
@@ -687,9 +687,9 @@ def get_analysis_summary_text():
             lines.append(f"- Free: {format_number_delta(latest['free_value'], previous['free_value'])} | {format_percent_delta(latest['free_percent'], previous['free_percent'])}")
             lines.append(f"- Gui Loi: {format_number_delta(latest['loi_gui'], previous['loi_gui'])}")
         else:
-            lines.append(f"- Ung: {int(latest['ung_value'] or 0):,} | {int(latest['ung_percent'] or 0)}%")
-            lines.append(f"- Fee: {int(latest['fee_value'] or 0):,} | {int(latest['fee_percent'] or 0)}%")
-            lines.append(f"- Free: {int(latest['free_value'] or 0):,} | {int(latest['free_percent'] or 0)}%")
+            lines.append(f"- Ung: {int(latest['ung_value'] or 0):,} | 1d {int(latest['ung_percent'] or 0)}%")
+            lines.append(f"- Fee: {int(latest['fee_value'] or 0):,} | 1d {int(latest['fee_percent'] or 0)}%")
+            lines.append(f"- Free: {int(latest['free_value'] or 0):,} | 1d {int(latest['free_percent'] or 0)}%")
             lines.append(f"- Gui Loi: {int(latest['loi_gui'] or 0):,}")
     else:
         lines.extend(["", "KPI gần nhất: chưa có dữ liệu."])
@@ -699,9 +699,9 @@ def get_analysis_summary_text():
             "",
             "Doanh thu cùng kỳ gần nhất:",
             f"- Kỳ: {same_period_row['time_range']}",
-            f"- Ung: {int(same_period_row['ung_value'] or 0):,} | {int(same_period_row['ung_percent'] or 0)}%",
-            f"- Fee: {int(same_period_row['fee_value'] or 0):,} | {int(same_period_row['fee_percent'] or 0)}%",
-            f"- Free: {int(same_period_row['free_value'] or 0):,} | {int(same_period_row['free_percent'] or 0)}%",
+            f"- Ung: {int(same_period_row['ung_value'] or 0):,} | 1d {int(same_period_row['ung_percent'] or 0)}%",
+            f"- Fee: {int(same_period_row['fee_value'] or 0):,} | 1d {int(same_period_row['fee_percent'] or 0)}%",
+            f"- Free: {int(same_period_row['free_value'] or 0):,} | 1d {int(same_period_row['free_percent'] or 0)}%",
         ])
 
     total_errors = 0
@@ -817,20 +817,20 @@ def get_forecast_text():
 
         lines.extend([
             "",
-            f"KPI kỳ tiếp theo, dựa trên {len(kpi_rows)} kỳ gần nhất:",
-            f"- Ung: {forecast_value(latest['ung_value'], ung_delta):,} | khoảng {next_ung_pct}%",
-            f"- Fee: {forecast_value(latest['fee_value'], fee_delta):,} | khoảng {next_fee_pct}%",
-            f"- Free: {forecast_value(latest['free_value'], free_delta):,} | khoảng {next_free_pct}%",
+            f"KPI kỳ tiếp theo (1h tới), dựa trên {len(kpi_rows)} kỳ gần nhất:",
+            f"- Ung: {forecast_value(latest['ung_value'], ung_delta):,} | 1d khoảng {next_ung_pct}%",
+            f"- Fee: {forecast_value(latest['fee_value'], fee_delta):,} | 1d khoảng {next_fee_pct}%",
+            f"- Free: {forecast_value(latest['free_value'], free_delta):,} | 1d khoảng {next_free_pct}%",
             f"- Gui Loi: {next_loi_gui:,}",
         ])
 
         risks = []
         if next_ung_pct <= UNG_ALERT:
-            risks.append(f"Ung có nguy cơ tiếp tục thấp ({next_ung_pct}%).")
+            risks.append(f"Ung có nguy cơ tiếp tục thấp so với 1d ({next_ung_pct}%).")
         if next_fee_pct <= -10:
-            risks.append(f"Fee có nguy cơ tiếp tục giảm ({next_fee_pct}%).")
+            risks.append(f"Fee có nguy cơ tiếp tục giảm so với 1d ({next_fee_pct}%).")
         if next_free_pct >= 15:
-            risks.append(f"Free có nguy cơ tăng mạnh ({next_free_pct}%).")
+            risks.append(f"Free có nguy cơ tăng mạnh so với 1d ({next_free_pct}%).")
         if next_loi_gui >= LOI_GUI_ALERT:
             risks.append(f"Gui Loi có nguy cơ vượt ngưỡng ({next_loi_gui:,}).")
 
