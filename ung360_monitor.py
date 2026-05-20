@@ -262,6 +262,8 @@ def build_main_menu():
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(
         telebot.types.KeyboardButton("Tổng lỗi hôm nay"),
+        telebot.types.KeyboardButton("Thiết bị đang lỗi"),
+        telebot.types.KeyboardButton("Log thiết bị"),
         telebot.types.KeyboardButton("Trạng thái"),
         telebot.types.KeyboardButton("Bot còn chạy không"),
         telebot.types.KeyboardButton("Chat ID"),
@@ -406,6 +408,89 @@ def get_today_error_summary_text():
     return "\n".join(lines)
 
 
+def get_device_status_text(only_problem=True):
+    if not os.path.exists(DB_PATH):
+        return "Chưa có database thiết bị."
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    if only_problem:
+        cursor.execute("""
+            SELECT *
+            FROM devices
+            WHERE status != 'OK'
+            ORDER BY updated_at DESC
+            LIMIT 30
+        """)
+    else:
+        cursor.execute("""
+            SELECT *
+            FROM devices
+            ORDER BY updated_at DESC
+            LIMIT 30
+        """)
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        return "Hiện chưa có thiết bị nào đang lỗi."
+
+    lines = ["* Thiết bị đang lỗi" if only_problem else "* Trạng thái thiết bị"]
+    for row in rows:
+        name_parts = [row["device_type"], row["device_name"]]
+        if row["component_name"]:
+            name_parts.append(row["component_name"])
+        if row["ip"]:
+            name_parts.append(row["ip"])
+
+        line = f"- {' | '.join(name_parts)}: {row['status']}"
+        if row["last_event_time"]:
+            line += f" từ {row['last_event_time']}"
+        if row["last_resource"]:
+            line += f" | {row['last_resource']} {row['last_usage'] or ''}"
+        lines.append(line)
+
+    return "\n".join(lines)
+
+
+def get_device_event_log_text(limit=10):
+    if not os.path.exists(DB_PATH):
+        return "Chưa có database thiết bị."
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT *
+        FROM device_events
+        ORDER BY id DESC
+        LIMIT ?
+    """, (limit,))
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        return "Chưa có log thiết bị."
+
+    lines = [f"* {limit} log thiết bị gần nhất"]
+    for row in rows:
+        name_parts = [row["device_type"], row["device_name"]]
+        if row["component_name"]:
+            name_parts.append(row["component_name"])
+        if row["ip"]:
+            name_parts.append(row["ip"])
+
+        line = f"- {row['event_time']} | {' | '.join(name_parts)} | {row['event_type']}"
+        if row["downtime_minutes"] is not None:
+            line += f" | Downtime: {row['downtime_minutes']} phút"
+        if row["resource"]:
+            line += f" | {row['resource']} {row['usage'] or ''}"
+        lines.append(line)
+
+    return "\n".join(lines)
+
+
 @bot.message_handler(commands=["start", "help"])
 def handle_help(message):
     if not is_authorized_chat(message):
@@ -417,12 +502,16 @@ def handle_help(message):
         "Các lệnh đang hỗ trợ:\n"
         "/status - Xem trạng thái monitor\n"
         "/errors - Tổng lỗi từ đầu ngày và mã lỗi\n"
+        "/devices - Thiết bị đang lỗi\n"
+        "/devicelog - Log mất/kết nối lại thiết bị\n"
         "/alive - Kiểm tra bot còn chạy không\n"
         "/chatid - Xem chat id hiện tại\n"
         "/help - Xem danh sách lệnh\n\n"
         "Bạn cũng có thể nhắn tự nhiên:\n"
         "trạng thái\n"
         "tổng lỗi hôm nay\n"
+        "thiết bị đang lỗi\n"
+        "log thiết bị\n"
         "bot còn chạy không\n"
         "id\n"
         "giúp tôi"
@@ -443,6 +532,22 @@ def handle_today_errors(message):
         return
 
     send_bot_reply(message, get_today_error_summary_text())
+
+
+@bot.message_handler(commands=["devices"])
+def handle_devices(message):
+    if not is_authorized_chat(message):
+        return
+
+    send_bot_reply(message, get_device_status_text())
+
+
+@bot.message_handler(commands=["devicelog"])
+def handle_device_log(message):
+    if not is_authorized_chat(message):
+        return
+
+    send_bot_reply(message, get_device_event_log_text())
 
 
 @bot.message_handler(commands=["alive", "ping"])
@@ -496,6 +601,27 @@ def handle_unknown_message(message):
         "gd loi hom nay",
     }:
         handle_today_errors(message)
+        return
+
+    if text in {
+        "thiet bi dang loi",
+        "thiet bi loi",
+        "aibox dang loi",
+        "camera dang loi",
+        "trang thai thiet bi",
+        "devices",
+    }:
+        handle_devices(message)
+        return
+
+    if text in {
+        "log thiet bi",
+        "lich su thiet bi",
+        "lich su mat ket noi",
+        "downtime",
+        "devicelog",
+    }:
+        handle_device_log(message)
         return
 
     if text in {
@@ -1058,6 +1184,47 @@ def init_db():
         )
     """)
 
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS devices (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            device_type TEXT,
+            device_name TEXT,
+            component_name TEXT DEFAULT '',
+            ip TEXT DEFAULT '',
+            status TEXT,
+            last_event_type TEXT,
+            last_event_time TEXT,
+            last_recovery_time TEXT,
+            last_downtime_minutes INTEGER,
+            last_resource TEXT,
+            last_usage TEXT,
+            threshold TEXT,
+            created_at TEXT,
+            updated_at TEXT,
+            UNIQUE(device_type, device_name, component_name, ip)
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS device_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            device_id INTEGER,
+            device_type TEXT,
+            device_name TEXT,
+            component_name TEXT,
+            ip TEXT,
+            event_type TEXT,
+            event_time TEXT,
+            recovery_time TEXT,
+            downtime_minutes INTEGER,
+            resource TEXT,
+            usage TEXT,
+            threshold TEXT,
+            raw_text TEXT,
+            created_at TEXT
+        )
+    """)
+
     conn.commit()
     conn.close()
     
@@ -1111,6 +1278,190 @@ def insert_kpi_data(data):
 
     conn.commit()
     conn.close()
+
+
+def normalize_device_value(value):
+    return (value or "").strip()
+
+
+def event_time_text(event_time):
+    if isinstance(event_time, datetime):
+        return event_time.strftime("%Y-%m-%d %H:%M:%S")
+    return str(event_time or datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+
+def get_or_create_device(cursor, device_type, device_name, component_name="", ip=""):
+    device_type = normalize_device_value(device_type)
+    device_name = normalize_device_value(device_name)
+    component_name = normalize_device_value(component_name)
+    ip = normalize_device_value(ip)
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    cursor.execute("""
+        INSERT OR IGNORE INTO devices (
+            device_type, device_name, component_name, ip,
+            status, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, 'OK', ?, ?)
+    """, (device_type, device_name, component_name, ip, now, now))
+
+    cursor.execute("""
+        SELECT id
+        FROM devices
+        WHERE device_type = ?
+          AND device_name = ?
+          AND component_name = ?
+          AND ip = ?
+    """, (device_type, device_name, component_name, ip))
+    return cursor.fetchone()[0]
+
+
+def update_device_status(device_type, device_name, component_name="", ip="", status="OK",
+                         event_type="", event_time=None, recovery_time=None,
+                         downtime_minutes=None, resource="", usage="", threshold=""):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    device_id = get_or_create_device(cursor, device_type, device_name, component_name, ip)
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cursor.execute("""
+        UPDATE devices
+        SET status = ?,
+            last_event_type = ?,
+            last_event_time = ?,
+            last_recovery_time = ?,
+            last_downtime_minutes = ?,
+            last_resource = ?,
+            last_usage = ?,
+            threshold = ?,
+            updated_at = ?
+        WHERE id = ?
+    """, (
+        status,
+        event_type,
+        event_time_text(event_time) if event_time else None,
+        event_time_text(recovery_time) if recovery_time else None,
+        downtime_minutes,
+        normalize_device_value(resource),
+        normalize_device_value(usage),
+        normalize_device_value(threshold),
+        now,
+        device_id
+    ))
+    conn.commit()
+    conn.close()
+    return device_id
+
+
+def insert_device_event(device_type, device_name, component_name="", ip="", event_type="",
+                        event_time=None, recovery_time=None, downtime_minutes=None,
+                        resource="", usage="", threshold="", raw_text=""):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    device_id = get_or_create_device(cursor, device_type, device_name, component_name, ip)
+    cursor.execute("""
+        INSERT INTO device_events (
+            device_id, device_type, device_name, component_name, ip,
+            event_type, event_time, recovery_time, downtime_minutes,
+            resource, usage, threshold, raw_text, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        device_id,
+        normalize_device_value(device_type),
+        normalize_device_value(device_name),
+        normalize_device_value(component_name),
+        normalize_device_value(ip),
+        normalize_device_value(event_type),
+        event_time_text(event_time),
+        event_time_text(recovery_time) if recovery_time else None,
+        downtime_minutes,
+        normalize_device_value(resource),
+        normalize_device_value(usage),
+        normalize_device_value(threshold),
+        raw_text,
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ))
+    conn.commit()
+    conn.close()
+
+
+def get_open_device_event_time(device_type, device_name, component_name="", ip=""):
+    if not os.path.exists(DB_PATH):
+        return None
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT event_time
+        FROM device_events
+        WHERE device_type = ?
+          AND device_name = ?
+          AND component_name = ?
+          AND ip = ?
+          AND event_type IN ('DOWN', 'RESOURCE_ALERT')
+          AND recovery_time IS NULL
+        ORDER BY id DESC
+        LIMIT 1
+    """, (
+        normalize_device_value(device_type),
+        normalize_device_value(device_name),
+        normalize_device_value(component_name),
+        normalize_device_value(ip)
+    ))
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row:
+        return None
+
+    try:
+        return datetime.strptime(row[0], "%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return None
+
+
+def close_open_device_event(device_type, device_name, component_name="", ip="", recovery_time=None):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    recovery_text = event_time_text(recovery_time)
+    cursor.execute("""
+        SELECT id, event_time
+        FROM device_events
+        WHERE device_type = ?
+          AND device_name = ?
+          AND component_name = ?
+          AND ip = ?
+          AND event_type IN ('DOWN', 'RESOURCE_ALERT')
+          AND recovery_time IS NULL
+        ORDER BY id DESC
+        LIMIT 1
+    """, (
+        normalize_device_value(device_type),
+        normalize_device_value(device_name),
+        normalize_device_value(component_name),
+        normalize_device_value(ip)
+    ))
+    row = cursor.fetchone()
+
+    downtime_minutes = None
+    if row:
+        event_id, down_text = row
+        try:
+            down_time = datetime.strptime(down_text, "%Y-%m-%d %H:%M:%S")
+            downtime_minutes = int((datetime.strptime(recovery_text, "%Y-%m-%d %H:%M:%S") - down_time).total_seconds() / 60)
+        except Exception:
+            downtime_minutes = None
+
+        cursor.execute("""
+            UPDATE device_events
+            SET recovery_time = ?,
+                downtime_minutes = ?
+            WHERE id = ?
+        """, (recovery_text, downtime_minutes, event_id))
+
+    conn.commit()
+    conn.close()
+    return downtime_minutes
     
 
 def insert_gd_loi_data(data):
@@ -1990,6 +2341,23 @@ def parse_aibox_mail(subject, body):
         current_usage = get_body_field(body, "Mức sử dụng hiện tại") or "N/A"
         threshold = get_body_field(body, "Ngưỡng cảnh báo") or "N/A"
         title = "AIBOX RESOURCE ALERT" if is_aibox_resource_alert(subject, body) else "AIBOX RESOURCE RECOVERY"
+        event_type = "RESOURCE_ALERT" if is_aibox_resource_alert(subject, body) else "RESOURCE_RECOVERY"
+        status = "RESOURCE_ALERT" if is_aibox_resource_alert(subject, body) else "OK"
+        downtime_minutes = None
+
+        if is_aibox_resource_recovery(subject, body):
+            downtime_minutes = close_open_device_event("AIBOX", device, resource, "", event_time)
+
+        update_device_status(
+            "AIBOX", device, resource, "", status, event_type,
+            event_time, event_time if is_aibox_resource_recovery(subject, body) else None,
+            downtime_minutes, resource, current_usage, threshold
+        )
+        insert_device_event(
+            "AIBOX", device, resource, "", event_type, event_time,
+            event_time if is_aibox_resource_recovery(subject, body) else None,
+            downtime_minutes, resource, current_usage, threshold, body
+        )
 
         resource_rows = re.findall(
             r'^\s*(CPU|RAM|NPU Core \d+)\s+([\d.]+%)',
@@ -2034,12 +2402,21 @@ Ngưỡng cảnh báo: {threshold}
                 "down_time": event_time,
                 "display_time": display_time
             }
+            update_device_status("AIBOX", name, "", ip, "DOWN", "DOWN", event_time)
+            insert_device_event("AIBOX", name, "", ip, "DOWN", event_time, raw_text=body)
             down_rows.append((name, ip))
         else:
             down_time = aibox_pending.get(key, {}).get("down_time")
+            if not down_time:
+                down_time = get_open_device_event_time("AIBOX", name, "", ip)
             downtime_minutes = None
             if down_time:
                 downtime_minutes = int((event_time - down_time).total_seconds() / 60)
+            closed_downtime = close_open_device_event("AIBOX", name, "", ip, event_time)
+            if downtime_minutes is None:
+                downtime_minutes = closed_downtime
+            update_device_status("AIBOX", name, "", ip, "OK", "RECOVERY", down_time, event_time, downtime_minutes)
+            insert_device_event("AIBOX", name, "", ip, "RECOVERY", event_time, event_time, downtime_minutes, raw_text=body)
             aibox_pending.pop(key, None)
             recovery_rows.append((name, ip, downtime_minutes))
 
@@ -2102,14 +2479,17 @@ def parse_camera_mail(subject, body):
 
             if status == "Mất kết nối":
                 key = f"{device}_{ip}"
+                cam_name = cam_name.strip()
                 camera_pending[key] = {
                     "device": device,
-                    "cam_name": cam_name.strip(),
+                    "cam_name": cam_name,
                     "ip": ip,
                     "down_time": event_time,
                     "display_time": display_time
                 }
-                affected.append((cam_name.strip(), ip))
+                update_device_status("CAMERA", device, cam_name, ip, "DOWN", "DOWN", event_time)
+                insert_device_event("CAMERA", device, cam_name, ip, "DOWN", event_time, raw_text=body)
+                affected.append((cam_name, ip))
 
         print(f"Camera down processed: {len(affected)} camera")
 
@@ -2126,16 +2506,26 @@ def parse_camera_mail(subject, body):
                 continue
 
             key = f"{device}_{ip}"
+            cam_name = cam_name.strip()
 
-            if key in camera_pending:
-                down_time = camera_pending[key]["down_time"]
+            down_time = camera_pending.get(key, {}).get("down_time")
+            if not down_time:
+                down_time = get_open_device_event_time("CAMERA", device, cam_name, ip)
+
+            if down_time:
                 downtime_minutes = int((event_time - down_time).total_seconds() / 60)
+            else:
+                downtime_minutes = close_open_device_event("CAMERA", device, cam_name, ip, event_time)
 
-                if key in camera_alerted:
-                    recovered.append((cam_name.strip(), ip, downtime_minutes))
+            close_open_device_event("CAMERA", device, cam_name, ip, event_time)
+            update_device_status("CAMERA", device, cam_name, ip, "OK", "RECOVERY", down_time, event_time, downtime_minutes)
+            insert_device_event("CAMERA", device, cam_name, ip, "RECOVERY", event_time, event_time, downtime_minutes, raw_text=body)
 
-                camera_pending.pop(key, None)
-                camera_alerted.pop(key, None)
+            if key in camera_alerted:
+                recovered.append((cam_name, ip, downtime_minutes))
+
+            camera_pending.pop(key, None)
+            camera_alerted.pop(key, None)
 
         if recovered:
             msg = f"* CAMERA RECOVERY - {display_time}\n\n"
