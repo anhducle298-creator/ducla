@@ -348,10 +348,7 @@ def format_uptime(delta):
 
 def get_alive_text():
     now = datetime.now()
-    lines = [
-        "* UNG360 monitor alive",
-        f"Hiện tại: {now.strftime('%d/%m/%Y %H:%M:%S')}",
-    ]
+    lines = ["* UNG360 monitor alive"]
 
     if MONITOR_STARTED_AT:
         lines.append(f"Bắt đầu chạy: {MONITOR_STARTED_AT.strftime('%d/%m/%Y %H:%M:%S')}")
