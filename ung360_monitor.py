@@ -34,6 +34,7 @@ MAIL_SEARCH_LIMIT = 20
 
 DB_PATH = "data/ung360.db"
 PROCESSED_FILE = "data/processed_mails.json"
+RESTART_FLAG_FILE = "data/restart_requested.json"
 MONITOR_STARTED_AT = None
 received_periods = set()
 missing_alert_sent = set()
@@ -1031,6 +1032,12 @@ def restart_monitor_after_reply(chat_id):
     time.sleep(1)
 
     try:
+        os.makedirs("data", exist_ok=True)
+        with open(RESTART_FLAG_FILE, "w", encoding="utf-8") as f:
+            json.dump({
+                "chat_id": chat_id,
+                "requested_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }, f, ensure_ascii=False)
         os.execv(sys.executable, [sys.executable] + sys.argv)
     except Exception as e:
         write_error_log(f"Restart monitor failed: {e}")
@@ -1193,6 +1200,38 @@ def start_telegram_bot():
     polling_thread = threading.Thread(target=run_telegram_polling, daemon=True)
     polling_thread.start()
     print("Telegram command listener started")
+
+
+def notify_restart_completed_if_needed():
+    if not os.path.exists(RESTART_FLAG_FILE):
+        return
+
+    try:
+        with open(RESTART_FLAG_FILE, "r", encoding="utf-8") as f:
+            restart_info = json.load(f)
+    except Exception as e:
+        write_error_log(f"Read restart flag failed: {e}")
+        restart_info = {}
+
+    try:
+        os.remove(RESTART_FLAG_FILE)
+    except Exception as e:
+        write_error_log(f"Remove restart flag failed: {e}")
+
+    chat_id = restart_info.get("chat_id") or CHAT_ID
+    requested_at = restart_info.get("requested_at", "N/A")
+    message = (
+        "* Restart monitor xong\n"
+        f"Yêu cầu lúc: {requested_at}\n"
+        f"Bắt đầu chạy: {MONITOR_STARTED_AT.strftime('%d/%m/%Y %H:%M:%S') if MONITOR_STARTED_AT else 'N/A'}\n"
+        f"Uptime: {format_uptime(datetime.now() - MONITOR_STARTED_AT) if MONITOR_STARTED_AT else 'N/A'}"
+    )
+
+    try:
+        bot.send_message(chat_id, message)
+        write_alert_log(message)
+    except Exception as e:
+        write_error_log(f"Send restart completed message failed: {e}")
 
 
 # ======================
@@ -3449,6 +3488,7 @@ def main():
     MONITOR_STARTED_AT = datetime.now()
     init_db()
     start_telegram_bot()
+    notify_restart_completed_if_needed()
     processed = load_processed_mails()
 
     while True:
