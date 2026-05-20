@@ -9,6 +9,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 import json
 import sqlite3
 import unicodedata
+import threading
 from datetime import datetime
 import telebot
 
@@ -76,6 +77,114 @@ if missing_config:
     raise RuntimeError("Missing required environment variables: " + ", ".join(missing_config))
 
 bot = telebot.TeleBot(BOT_TOKEN)
+
+
+# ======================
+# TELEGRAM COMMANDS
+# ======================
+
+def is_authorized_chat(message):
+    return str(message.chat.id) == str(CHAT_ID)
+
+
+def send_bot_reply(message, text):
+    bot.reply_to(message, text)
+
+
+def get_db_count(table):
+    if not os.path.exists(DB_PATH):
+        return 0
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(f"SELECT COUNT(*) FROM {table}")
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
+
+
+def get_monitor_status_text():
+    status_lines = [
+        "* UNG360 Monitor Status",
+        f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"Poll interval: {POLL_INTERVAL} seconds",
+        f"Heartbeat interval: {HEARTBEAT_INTERVAL} seconds",
+        f"Received periods in memory: {len(received_periods)}",
+        f"Camera pending: {len(camera_pending)}",
+        f"AIBOX pending: {len(aibox_pending)}",
+    ]
+
+    try:
+        status_lines.extend([
+            f"KPI rows: {get_db_count('kpi_data')}",
+            f"GD loi rows: {get_db_count('gd_loi_data')}",
+            f"Same-period rows: {get_db_count('same_period_data')}",
+            f"UT360 scoring rows: {get_db_count('ut360_scoring_data')}",
+        ])
+    except Exception as e:
+        status_lines.append(f"DB status error: {e}")
+
+    return "\n".join(status_lines)
+
+
+@bot.message_handler(commands=["start", "help"])
+def handle_help(message):
+    if not is_authorized_chat(message):
+        send_bot_reply(message, f"Chat ID của bạn: {message.chat.id}")
+        return
+
+    send_bot_reply(
+        message,
+        "Các lệnh đang hỗ trợ:\n"
+        "/status - Xem trạng thái monitor\n"
+        "/alive - Kiểm tra bot còn chạy không\n"
+        "/chatid - Xem chat id hiện tại\n"
+        "/help - Xem danh sách lệnh"
+    )
+
+
+@bot.message_handler(commands=["status"])
+def handle_status(message):
+    if not is_authorized_chat(message):
+        return
+
+    send_bot_reply(message, get_monitor_status_text())
+
+
+@bot.message_handler(commands=["alive", "ping"])
+def handle_alive(message):
+    if not is_authorized_chat(message):
+        return
+
+    send_bot_reply(message, f"UNG360 monitor alive - {datetime.now().strftime('%d/%m %H:%M:%S')}")
+
+
+@bot.message_handler(commands=["chatid"])
+def handle_chat_id(message):
+    send_bot_reply(message, f"Chat ID của bạn: {message.chat.id}")
+
+
+@bot.message_handler(func=lambda message: True)
+def handle_unknown_message(message):
+    if not is_authorized_chat(message):
+        return
+
+    send_bot_reply(message, "Mình chưa hiểu lệnh này. Gửi /help để xem các lệnh đang hỗ trợ.")
+
+
+def run_telegram_polling():
+    while True:
+        try:
+            bot.infinity_polling(timeout=30, long_polling_timeout=30, skip_pending=True)
+        except Exception as e:
+            write_error_log(f"Telegram polling error: {e}")
+            time.sleep(10)
+
+
+def start_telegram_bot():
+    polling_thread = threading.Thread(target=run_telegram_polling, daemon=True)
+    polling_thread.start()
+    print("Telegram command listener started")
 
 
 # ======================
@@ -1845,6 +1954,7 @@ def main():
     print("Ung360 monitor is running...")
 
     init_db()
+    start_telegram_bot()
     processed = load_processed_mails()
     last_heartbeat = time.time()
 
