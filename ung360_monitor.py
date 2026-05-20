@@ -264,6 +264,7 @@ def build_main_menu():
     markup.add(
         telebot.types.KeyboardButton("Tổng lỗi hôm nay"),
         telebot.types.KeyboardButton("Phân tích tổng hợp"),
+        telebot.types.KeyboardButton("Dự báo"),
         telebot.types.KeyboardButton("Thiết bị đang lỗi"),
         telebot.types.KeyboardButton("Log thiết bị"),
         telebot.types.KeyboardButton("Cảnh báo gần nhất"),
@@ -685,6 +686,156 @@ def get_analysis_summary_text():
     return "\n".join(lines)
 
 
+def average_delta(rows, column):
+    values = [int(row[column] or 0) for row in rows]
+    if len(values) < 2:
+        return 0
+
+    deltas = [values[index] - values[index - 1] for index in range(1, len(values))]
+    return round(sum(deltas) / len(deltas))
+
+
+def forecast_value(current, delta):
+    return max(0, int(current or 0) + int(delta or 0))
+
+
+def get_forecast_text():
+    if not os.path.exists(DB_PATH):
+        return "Chưa có database để dự báo."
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    now = datetime.now()
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT *
+        FROM kpi_data
+        ORDER BY id DESC
+        LIMIT 6
+    """)
+    kpi_rows = list(reversed(cursor.fetchall()))
+
+    cursor.execute("""
+        SELECT *
+        FROM gd_loi_data
+        WHERE report_time LIKE ?
+        ORDER BY report_time ASC, id ASC
+    """, (today + "%",))
+    gd_rows = cursor.fetchall()
+
+    cursor.execute("""
+        SELECT event_type, COUNT(*) AS count
+        FROM device_events
+        WHERE created_at LIKE ?
+        GROUP BY event_type
+    """, (today + "%",))
+    device_event_rows = cursor.fetchall()
+
+    conn.close()
+
+    lines = [f"* Dự báo vận hành - {now.strftime('%d/%m %H:%M')}"]
+
+    if kpi_rows:
+        latest = kpi_rows[-1]
+        ung_delta = average_delta(kpi_rows, "ung_value")
+        fee_delta = average_delta(kpi_rows, "fee_value")
+        free_delta = average_delta(kpi_rows, "free_value")
+        loi_gui_delta = average_delta(kpi_rows, "loi_gui")
+        ung_pct_delta = average_delta(kpi_rows, "ung_percent")
+        fee_pct_delta = average_delta(kpi_rows, "fee_percent")
+        free_pct_delta = average_delta(kpi_rows, "free_percent")
+
+        next_ung_pct = int(latest["ung_percent"] or 0) + ung_pct_delta
+        next_fee_pct = int(latest["fee_percent"] or 0) + fee_pct_delta
+        next_free_pct = int(latest["free_percent"] or 0) + free_pct_delta
+        next_loi_gui = forecast_value(latest["loi_gui"], loi_gui_delta)
+
+        lines.extend([
+            "",
+            f"KPI kỳ tiếp theo, dựa trên {len(kpi_rows)} kỳ gần nhất:",
+            f"- Ung: {forecast_value(latest['ung_value'], ung_delta):,} | khoảng {next_ung_pct}%",
+            f"- Fee: {forecast_value(latest['fee_value'], fee_delta):,} | khoảng {next_fee_pct}%",
+            f"- Free: {forecast_value(latest['free_value'], free_delta):,} | khoảng {next_free_pct}%",
+            f"- Gui Loi: {next_loi_gui:,}",
+        ])
+
+        risks = []
+        if next_ung_pct <= UNG_ALERT:
+            risks.append(f"Ung có nguy cơ tiếp tục thấp ({next_ung_pct}%).")
+        if next_fee_pct <= -10:
+            risks.append(f"Fee có nguy cơ tiếp tục giảm ({next_fee_pct}%).")
+        if next_free_pct >= 15:
+            risks.append(f"Free có nguy cơ tăng mạnh ({next_free_pct}%).")
+        if next_loi_gui >= LOI_GUI_ALERT:
+            risks.append(f"Gui Loi có nguy cơ vượt ngưỡng ({next_loi_gui:,}).")
+
+        if risks:
+            lines.append("- Rủi ro KPI:")
+            for risk in risks:
+                lines.append(f"  {risk}")
+    else:
+        lines.extend(["", "KPI: chưa đủ dữ liệu để dự báo."])
+
+    total_errors = 0
+    total_damage = 0
+    code_counts = {}
+    for row in gd_rows:
+        total_errors += int(row["total_errors"] or 0)
+        total_damage += int(row["damage_vnd"] or 0)
+        add_code_count(code_counts, "7", row["code_7"])
+        add_code_count(code_counts, "41", row["code_41"])
+        add_code_count(code_counts, "-1", row["code_minus_1"])
+        try:
+            for code, count in json.loads(row["other_codes"] or "{}").items():
+                add_code_count(code_counts, code, count)
+        except Exception:
+            pass
+
+    minutes_elapsed = max(1, now.hour * 60 + now.minute)
+    day_ratio = minutes_elapsed / (24 * 60)
+    projected_errors = round(total_errors / day_ratio) if total_errors else 0
+    projected_damage = round(total_damage / day_ratio) if total_damage else 0
+
+    lines.extend([
+        "",
+        "Dự báo lỗi giao dịch cuối ngày:",
+        f"- Hiện tại: {total_errors:,} GD",
+        f"- Dự báo cuối ngày: {projected_errors:,} GD",
+        f"- Thiệt hại dự báo: {projected_damage:,} VND",
+    ])
+
+    if projected_errors >= GD_LOI_ALERT:
+        lines.append(f"- Rủi ro: lỗi giao dịch có thể vượt ngưỡng {GD_LOI_ALERT:,} GD.")
+    if projected_damage >= THIET_HAI_ALERT:
+        lines.append(f"- Rủi ro: thiệt hại có thể vượt ngưỡng {THIET_HAI_ALERT:,} VND.")
+    if code_counts:
+        top_code, top_count = sorted(code_counts.items(), key=lambda item: item[1], reverse=True)[0]
+        top_projected = round(top_count / day_ratio)
+        description = get_result_code_description(top_code)
+        suffix = f" - {description}" if description else ""
+        lines.append(f"- Mã lỗi nổi bật: {top_code}: {top_count:,} GD, dự báo {top_projected:,} GD{suffix}")
+
+    event_counts = {row["event_type"]: int(row["count"] or 0) for row in device_event_rows}
+    down_count = event_counts.get("DOWN", 0) + event_counts.get("RESOURCE_ALERT", 0)
+    projected_down = round(down_count / day_ratio) if down_count else 0
+    lines.extend([
+        "",
+        "Dự báo sự cố thiết bị cuối ngày:",
+        f"- Hiện tại: {down_count} event lỗi",
+        f"- Dự báo cuối ngày: {projected_down} event lỗi",
+    ])
+
+    if projected_down >= 10:
+        lines.append("- Rủi ro: thiết bị có dấu hiệu phát sinh lỗi nhiều trong ngày.")
+
+    lines.append("")
+    lines.append("Ghi chú: dự báo dựa trên tốc độ hiện tại và dữ liệu đã đọc, dùng để tham khảo vận hành.")
+
+    return "\n".join(lines)
+
+
 @bot.message_handler(commands=["start", "help"])
 def handle_help(message):
     if not is_authorized_chat(message):
@@ -696,6 +847,7 @@ def handle_help(message):
         "Các lệnh đang hỗ trợ:\n"
         "/status - Xem trạng thái monitor\n"
         "/analysis - Phân tích tổng hợp\n"
+        "/forecast - Dự báo vận hành\n"
         "/errors - Tổng lỗi từ đầu ngày và mã lỗi\n"
         "/devices - Thiết bị đang lỗi\n"
         "/devicelog - Log mất/kết nối lại thiết bị\n"
@@ -708,6 +860,7 @@ def handle_help(message):
         "Bạn cũng có thể nhắn tự nhiên:\n"
         "trạng thái\n"
         "phân tích tổng hợp\n"
+        "dự báo\n"
         "tổng lỗi hôm nay\n"
         "thiết bị đang lỗi\n"
         "log thiết bị\n"
@@ -734,6 +887,14 @@ def handle_analysis(message):
         return
 
     send_bot_reply(message, get_analysis_summary_text())
+
+
+@bot.message_handler(commands=["forecast", "dubao"])
+def handle_forecast(message):
+    if not is_authorized_chat(message):
+        return
+
+    send_bot_reply(message, get_forecast_text())
 
 
 @bot.message_handler(commands=["errors", "loi"])
@@ -848,6 +1009,16 @@ def handle_unknown_message(message):
         "analysis",
     }:
         handle_analysis(message)
+        return
+
+    if text in {
+        "du bao",
+        "du bao van hanh",
+        "du bao hom nay",
+        "forecast",
+        "predict",
+    }:
+        handle_forecast(message)
         return
 
     if text in {
