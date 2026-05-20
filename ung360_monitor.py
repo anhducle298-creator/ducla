@@ -1186,15 +1186,66 @@ def handle_chat_id(message):
     send_bot_reply(message, f"Chat ID của bạn: {message.chat.id}")
 
 
+def truncate_text(text, limit=1500):
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "\n..."
+
+
+def get_git_commit_short():
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=os.getcwd(),
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return "N/A"
+
+
+def pull_latest_code():
+    return subprocess.run(
+        ["git", "pull", "--ff-only"],
+        cwd=os.getcwd(),
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+
 def restart_monitor_after_reply(chat_id):
     time.sleep(1)
 
     try:
+        pull_result = pull_latest_code()
+        pull_output = "\n".join(
+            part for part in [pull_result.stdout.strip(), pull_result.stderr.strip()]
+            if part
+        )
+
+        if pull_result.returncode != 0:
+            message = (
+                "* Cập nhật code thất bại\n"
+                "Monitor vẫn đang chạy bản cũ.\n\n"
+                f"{truncate_text(pull_output)}"
+            )
+            bot.send_message(chat_id, message)
+            write_error_log(f"Git pull failed before restart: {pull_output}")
+            return
+
         os.makedirs("data", exist_ok=True)
         with open(RESTART_FLAG_FILE, "w", encoding="utf-8") as f:
             json.dump({
                 "chat_id": chat_id,
                 "requested_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "commit": get_git_commit_short(),
+                "git_pull": pull_output,
             }, f, ensure_ascii=False)
 
         script_path = os.path.abspath(sys.argv[0] or __file__)
@@ -1220,7 +1271,7 @@ def handle_restart(message):
     if not is_authorized_chat(message):
         return
 
-    send_bot_reply(message, "Đang restart monitor...")
+    send_bot_reply(message, "Đang cập nhật code từ Git rồi restart monitor...")
     threading.Thread(
         target=restart_monitor_after_reply,
         args=(message.chat.id,),
@@ -1391,9 +1442,11 @@ def notify_restart_completed_if_needed():
 
     chat_id = restart_info.get("chat_id") or CHAT_ID
     requested_at = restart_info.get("requested_at", "N/A")
+    commit = restart_info.get("commit", "N/A")
     message = (
         "* Restart monitor xong\n"
         f"Yêu cầu lúc: {requested_at}\n"
+        f"Commit: {commit}\n"
         f"Bắt đầu chạy: {MONITOR_STARTED_AT.strftime('%d/%m/%Y %H:%M:%S') if MONITOR_STARTED_AT else 'N/A'}\n"
         f"Uptime: {format_uptime(datetime.now() - MONITOR_STARTED_AT) if MONITOR_STARTED_AT else 'N/A'}"
     )
