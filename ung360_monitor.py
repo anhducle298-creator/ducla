@@ -10,7 +10,7 @@ import json
 import sqlite3
 import unicodedata
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 import telebot
 
 # ======================
@@ -500,10 +500,10 @@ def get_device_event_log_text(limit=10):
     if not os.path.exists(DB_PATH):
         return "Chưa có database thiết bị."
 
+    since_time = (datetime.now() - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    per_device_limit = 5
     cursor.execute("""
         SELECT *
         FROM (
@@ -514,22 +514,22 @@ def get_device_event_log_text(limit=10):
                     ORDER BY id DESC
                 ) AS rn
             FROM device_events
+            WHERE event_time >= ?
         )
-        WHERE rn <= ?
         ORDER BY
             device_type ASC,
             device_name ASC,
             component_name ASC,
             ip ASC,
             id DESC
-    """, (per_device_limit,))
+    """, (since_time,))
     rows = cursor.fetchall()
     conn.close()
 
     if not rows:
-        return "Chưa có log thiết bị."
+        return "Chưa có log thiết bị trong 24 giờ gần nhất."
 
-    lines = [f"* Log thiết bị theo từng thiết bị ({per_device_limit} event gần nhất/thiết bị)"]
+    lines = ["* Log thiết bị theo từng thiết bị (24 giờ gần nhất)"]
     current_device = None
     for row in rows:
         name_parts = [row["device_type"], row["device_name"]]
