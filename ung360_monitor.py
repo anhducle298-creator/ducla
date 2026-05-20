@@ -327,6 +327,41 @@ def get_monitor_status_text():
     return "\n".join(status_lines)
 
 
+def format_uptime(delta):
+    total_seconds = int(delta.total_seconds())
+    days, remainder = divmod(total_seconds, 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, seconds = divmod(remainder, 60)
+
+    parts = []
+    if days:
+        parts.append(f"{days} ngày")
+    if hours:
+        parts.append(f"{hours} giờ")
+    if minutes:
+        parts.append(f"{minutes} phút")
+    if not parts:
+        parts.append(f"{seconds} giây")
+
+    return " ".join(parts)
+
+
+def get_alive_text():
+    now = datetime.now()
+    lines = [
+        "* UNG360 monitor alive",
+        f"Hiện tại: {now.strftime('%d/%m/%Y %H:%M:%S')}",
+    ]
+
+    if MONITOR_STARTED_AT:
+        lines.append(f"Bắt đầu chạy: {MONITOR_STARTED_AT.strftime('%d/%m/%Y %H:%M:%S')}")
+        lines.append(f"Uptime: {format_uptime(now - MONITOR_STARTED_AT)}")
+    else:
+        lines.append("Uptime: N/A")
+
+    return "\n".join(lines)
+
+
 def add_code_count(code_counts, code, value):
     if not value:
         return
@@ -946,7 +981,7 @@ def handle_alive(message):
     if not is_authorized_chat(message):
         return
 
-    send_bot_reply(message, f"UNG360 monitor alive - {datetime.now().strftime('%d/%m %H:%M:%S')}")
+    send_bot_reply(message, get_alive_text())
 
 
 @bot.message_handler(commands=["chatid"])
