@@ -99,6 +99,26 @@ def get_normalized_message_text(message):
     return normalize_text(get_message_text(message)).strip()
 
 
+def build_main_menu():
+    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    markup.add(
+        telebot.types.KeyboardButton("Trạng thái"),
+        telebot.types.KeyboardButton("Bot còn chạy không"),
+        telebot.types.KeyboardButton("Chat ID"),
+        telebot.types.KeyboardButton("Trợ giúp"),
+        telebot.types.KeyboardButton("Ẩn menu"),
+    )
+    return markup
+
+
+def send_main_menu(message):
+    bot.reply_to(
+        message,
+        "Mình đây. Bạn muốn kiểm tra gì?",
+        reply_markup=build_main_menu()
+    )
+
+
 def get_db_count(table):
     if not os.path.exists(DB_PATH):
         return 0
@@ -184,6 +204,18 @@ def handle_unknown_message(message):
 
     text = get_normalized_message_text(message)
 
+    if text in {"alo", "hello", "hi", "chao", "chao bot", "menu", "mo menu"}:
+        send_main_menu(message)
+        return
+
+    if text in {"an menu", "dong menu", "hide menu"}:
+        bot.reply_to(
+            message,
+            "Đã ẩn menu.",
+            reply_markup=telebot.types.ReplyKeyboardRemove()
+        )
+        return
+
     if text in {"help", "tro giup", "giup toi", "huong dan", "lenh"}:
         handle_help(message)
         return
@@ -208,7 +240,7 @@ def handle_unknown_message(message):
         handle_chat_id(message)
         return
 
-    send_bot_reply(message, "Mình chưa hiểu lệnh này. Gửi /help để xem các lệnh đang hỗ trợ.")
+    send_bot_reply(message, "Mình chưa hiểu lệnh này. Nhắn alo để mở menu lựa chọn.")
 
 
 def run_telegram_polling():
