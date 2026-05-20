@@ -703,7 +703,110 @@ def get_analysis_summary_text():
 
     conn.close()
 
+    total_errors = 0
+    total_damage = 0
+    code_counts = {}
+    for row in gd_rows:
+        total_errors += int(row["total_errors"] or 0)
+        total_damage += int(row["damage_vnd"] or 0)
+        add_code_count(code_counts, "7", row["code_7"])
+        add_code_count(code_counts, "41", row["code_41"])
+        add_code_count(code_counts, "-1", row["code_minus_1"])
+        try:
+            for code, count in json.loads(row["other_codes"] or "{}").items():
+                add_code_count(code_counts, code, count)
+        except Exception:
+            pass
+
+    device_down_map = {}
+    for row in device_down_event_rows:
+        key = (
+            row["device_type"],
+            row["device_name"],
+            row["component_name"] or "",
+            row["ip"] or "",
+        )
+        event_key = (row["event_time"], row["downtime_minutes"])
+        event_list = device_down_map.setdefault(key, [])
+        if not any((item["event_time"], item["downtime_minutes"]) == event_key for item in event_list):
+            event_list.append(row)
+
     lines = [f"* Phân tích tổng hợp - {datetime.now().strftime('%d/%m %H:%M')}"]
+
+    insights = []
+    if kpi_rows:
+        latest_kpi = kpi_rows[0]
+        previous_kpi = kpi_rows[1] if len(kpi_rows) > 1 else None
+        kpi_issues = []
+
+        if int(latest_kpi["ung_percent"] or 0) <= UNG_ALERT:
+            kpi_issues.append(f"Ung thấp so với 1d ({int(latest_kpi['ung_percent'] or 0)}%)")
+        if int(latest_kpi["fee_percent"] or 0) <= -10:
+            kpi_issues.append(f"Fee thấp so với 1d ({int(latest_kpi['fee_percent'] or 0)}%)")
+        if int(latest_kpi["free_percent"] or 0) >= 15:
+            kpi_issues.append(f"Free tăng mạnh so với 1d ({int(latest_kpi['free_percent'] or 0)}%)")
+        if int(latest_kpi["loi_gui"] or 0) >= LOI_GUI_ALERT:
+            kpi_issues.append(f"Gui Loi vượt ngưỡng ({int(latest_kpi['loi_gui'] or 0):,})")
+
+        if previous_kpi:
+            loi_delta = int(latest_kpi["loi_gui"] or 0) - int(previous_kpi["loi_gui"] or 0)
+            if loi_delta > 0:
+                kpi_issues.append(f"Gui Loi tăng 1h +{loi_delta:,}")
+
+        if kpi_issues:
+            insights.append("KPI cần chú ý: " + "; ".join(kpi_issues[:4]) + ".")
+        else:
+            insights.append("KPI chưa có dấu hiệu vượt ngưỡng chính.")
+
+    latest_gd_dt = None
+    for row in reversed(gd_rows):
+        report_dt = parse_datetime_text(row["report_time"])
+        if report_dt:
+            latest_gd_dt = report_dt
+            break
+
+    if latest_gd_dt:
+        baseline = get_gd_loi_daily_baseline(latest_gd_dt.strftime("%Y-%m-%d"))
+        if baseline["days"] >= GD_LOI_BASELINE_MIN_DAYS:
+            expected_errors, error_threshold = get_gd_loi_expected_threshold(baseline["avg_errors"], latest_gd_dt)
+            if total_errors > error_threshold:
+                insights.append(
+                    f"Lỗi GD bất thường: {total_errors:,} > ngưỡng {error_threshold:,} "
+                    f"tại mốc {latest_gd_dt.strftime('%H:%M')}."
+                )
+            else:
+                insights.append(
+                    f"Lỗi GD trong baseline: {total_errors:,}/{error_threshold:,} "
+                    f"tại mốc {latest_gd_dt.strftime('%H:%M')}."
+                )
+
+    if problem_device_rows:
+        first_device = problem_device_rows[0]
+        device_name = " | ".join(
+            part for part in [
+                first_device["device_type"],
+                first_device["device_name"],
+                first_device["component_name"],
+                first_device["ip"],
+            ]
+            if part
+        )
+        insights.append(f"Còn {len(problem_device_rows)} thiết bị đang lỗi, mới nhất: {device_name}.")
+    else:
+        insights.append("Không có thiết bị đang lỗi.")
+
+    if device_down_map:
+        top_key, top_events = max(device_down_map.items(), key=lambda item: len(item[1]))
+        top_name = " | ".join(part for part in top_key if part)
+        top_downtime = sum(int(row["downtime_minutes"] or 0) for row in top_events)
+        insights.append(
+            f"Thiết bị down nhiều nhất hôm nay: {top_name} "
+            f"({len(top_events)} lần, downtime {top_downtime} phút)."
+        )
+
+    if insights:
+        lines.extend(["", "Nhận định:"])
+        lines.extend(f"- {item}" for item in insights)
 
     if kpi_rows:
         latest = kpi_rows[0]
