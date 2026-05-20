@@ -91,6 +91,14 @@ def send_bot_reply(message, text):
     bot.reply_to(message, text)
 
 
+def get_message_text(message):
+    return (message.text or "").strip()
+
+
+def get_normalized_message_text(message):
+    return normalize_text(get_message_text(message)).strip()
+
+
 def get_db_count(table):
     if not os.path.exists(DB_PATH):
         return 0
@@ -139,7 +147,12 @@ def handle_help(message):
         "/status - Xem trạng thái monitor\n"
         "/alive - Kiểm tra bot còn chạy không\n"
         "/chatid - Xem chat id hiện tại\n"
-        "/help - Xem danh sách lệnh"
+        "/help - Xem danh sách lệnh\n\n"
+        "Bạn cũng có thể nhắn tự nhiên:\n"
+        "trạng thái\n"
+        "bot còn chạy không\n"
+        "id\n"
+        "giúp tôi"
     )
 
 
@@ -167,6 +180,32 @@ def handle_chat_id(message):
 @bot.message_handler(func=lambda message: True)
 def handle_unknown_message(message):
     if not is_authorized_chat(message):
+        return
+
+    text = get_normalized_message_text(message)
+
+    if text in {"help", "tro giup", "giup toi", "huong dan", "lenh"}:
+        handle_help(message)
+        return
+
+    if text in {"status", "trang thai", "tinh trang", "kiem tra", "check", "monitor"}:
+        handle_status(message)
+        return
+
+    if text in {
+        "alive",
+        "ping",
+        "bot con chay khong",
+        "con chay khong",
+        "bot song khong",
+        "bot ok khong",
+        "ok khong",
+    }:
+        handle_alive(message)
+        return
+
+    if text in {"id", "chat id", "chatid", "ma chat", "lay id"}:
+        handle_chat_id(message)
         return
 
     send_bot_reply(message, "Mình chưa hiểu lệnh này. Gửi /help để xem các lệnh đang hỗ trợ.")
