@@ -102,6 +102,7 @@ def get_normalized_message_text(message):
 def build_main_menu():
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(
+        telebot.types.KeyboardButton("Tổng lỗi hôm nay"),
         telebot.types.KeyboardButton("Trạng thái"),
         telebot.types.KeyboardButton("Bot còn chạy không"),
         telebot.types.KeyboardButton("Chat ID"),
@@ -155,6 +156,85 @@ def get_monitor_status_text():
     return "\n".join(status_lines)
 
 
+def add_code_count(code_counts, code, value):
+    if not value:
+        return
+
+    code_counts[str(code)] = code_counts.get(str(code), 0) + int(value)
+
+
+def get_today_error_summary_text():
+    if not os.path.exists(DB_PATH):
+        return "Chưa có database để kiểm tra lỗi."
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT report_time, total_errors, code_7, code_41, code_minus_1, other_codes
+        FROM gd_loi_data
+        WHERE report_time LIKE ?
+        ORDER BY report_time ASC, id ASC
+    """, (today + "%",))
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        return f"Chưa có dữ liệu lỗi giao dịch hôm nay ({datetime.now().strftime('%d/%m')})."
+
+    daily_rows = [
+        row for row in rows
+        if str(row["report_time"]).endswith("00:00:00") and int(row["total_errors"] or 0) > 0
+    ]
+    base_row = daily_rows[-1] if daily_rows else None
+    detail_rows = [row for row in rows if row is not base_row]
+
+    total_errors = int(base_row["total_errors"] or 0) if base_row else 0
+    code_counts = {}
+
+    if base_row:
+        add_code_count(code_counts, "7", base_row["code_7"])
+        add_code_count(code_counts, "41", base_row["code_41"])
+        add_code_count(code_counts, "-1", base_row["code_minus_1"])
+        try:
+            for code, count in json.loads(base_row["other_codes"] or "{}").items():
+                add_code_count(code_counts, code, count)
+        except Exception:
+            pass
+
+    for row in detail_rows:
+        total_errors += int(row["total_errors"] or 0)
+        add_code_count(code_counts, "7", row["code_7"])
+        add_code_count(code_counts, "41", row["code_41"])
+        add_code_count(code_counts, "-1", row["code_minus_1"])
+        try:
+            for code, count in json.loads(row["other_codes"] or "{}").items():
+                add_code_count(code_counts, code, count)
+        except Exception:
+            pass
+
+    lines = [
+        f"* Tổng lỗi từ đầu ngày - {datetime.now().strftime('%d/%m %H:%M')}",
+        f"Tổng lỗi: {total_errors:,} GD",
+        f"Số bản ghi đã đọc: {len(rows)}",
+    ]
+
+    if base_row:
+        lines.append(f"Mốc tổng hợp: {base_row['report_time']}")
+
+    if code_counts:
+        lines.append("")
+        lines.append("Mã lỗi:")
+        for code, count in sorted(code_counts.items(), key=lambda item: item[1], reverse=True):
+            lines.append(f"- Code {code}: {count:,} GD")
+    else:
+        lines.append("")
+        lines.append("Chưa có số liệu mã lỗi.")
+
+    return "\n".join(lines)
+
+
 @bot.message_handler(commands=["start", "help"])
 def handle_help(message):
     if not is_authorized_chat(message):
@@ -165,11 +245,13 @@ def handle_help(message):
         message,
         "Các lệnh đang hỗ trợ:\n"
         "/status - Xem trạng thái monitor\n"
+        "/errors - Tổng lỗi từ đầu ngày và mã lỗi\n"
         "/alive - Kiểm tra bot còn chạy không\n"
         "/chatid - Xem chat id hiện tại\n"
         "/help - Xem danh sách lệnh\n\n"
         "Bạn cũng có thể nhắn tự nhiên:\n"
         "trạng thái\n"
+        "tổng lỗi hôm nay\n"
         "bot còn chạy không\n"
         "id\n"
         "giúp tôi"
@@ -182,6 +264,14 @@ def handle_status(message):
         return
 
     send_bot_reply(message, get_monitor_status_text())
+
+
+@bot.message_handler(commands=["errors", "loi"])
+def handle_today_errors(message):
+    if not is_authorized_chat(message):
+        return
+
+    send_bot_reply(message, get_today_error_summary_text())
 
 
 @bot.message_handler(commands=["alive", "ping"])
@@ -222,6 +312,19 @@ def handle_unknown_message(message):
 
     if text in {"status", "trang thai", "tinh trang", "kiem tra", "check", "monitor"}:
         handle_status(message)
+        return
+
+    if text in {
+        "tong loi",
+        "tong loi hom nay",
+        "loi hom nay",
+        "ma loi",
+        "ma loi hom nay",
+        "kiem tra loi",
+        "thong ke loi",
+        "gd loi hom nay",
+    }:
+        handle_today_errors(message)
         return
 
     if text in {
