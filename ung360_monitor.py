@@ -622,6 +622,20 @@ def format_percent_delta(current, previous):
     return f"1d {int(current or 0)}% (1h {sign}{delta}%)"
 
 
+def format_kpi_alert_metric(value, pct, previous_value, previous_pct):
+    return (
+        f"- Hiện tại: {int(value or 0):,} | 1d {int(pct or 0)}%\n"
+        f"- 1h trước: {int(previous_value or 0):,} | 1d {int(previous_pct or 0)}%"
+    )
+
+
+def format_same_period_alert_metric(value, diff, pct):
+    return (
+        f"- Hiện tại: {int(value or 0):,}\n"
+        f"- So với 1d cùng kỳ: {int(diff or 0):,} ({int(pct or 0)}%)"
+    )
+
+
 def get_analysis_summary_text():
     if not os.path.exists(DB_PATH):
         return "Chưa có database để phân tích."
@@ -2408,8 +2422,8 @@ def parse_kpi_ung360(body):
         old_pct = previous.get("ung_percent", 0) if previous else 0
         alerts.append(
             f"Ung:\n"
-            f"- Hiện tại: {ung_value:,} ({ung_pct}%)\n"
-            f"- Kỳ trước: {old:,} ({old_pct}%) → ứng tiền giảm mạnh so với cùng thời điểm hôm trước"
+            f"{format_kpi_alert_metric(ung_value, ung_pct, old, old_pct)}\n"
+            f"→ 1d giảm mạnh"
         )
 
     if hoan_pct <= HOAN_ALERT:
@@ -2417,8 +2431,8 @@ def parse_kpi_ung360(body):
         old_pct = previous.get("hoan_percent", 0) if previous else 0
         alerts.append(
             f"Hoan:\n"
-            f"- Hiện tại: {hoan_value:,} ({hoan_pct}%)\n"
-            f"- Kỳ trước: {old:,} ({old_pct}%) → hoàn ứng thấp hơn cùng kỳ"
+            f"{format_kpi_alert_metric(hoan_value, hoan_pct, old, old_pct)}\n"
+            f"→ 1d thấp hơn ngưỡng"
         )
 
     if fee_pct <= -10:
@@ -2426,8 +2440,8 @@ def parse_kpi_ung360(body):
         old_pct = previous.get("fee_percent", 0) if previous else 0
         alerts.append(
             f"Fee:\n"
-            f"- Hiện tại: {fee_value:,} ({fee_pct}%)\n"
-            f"- Kỳ trước: {old:,} ({old_pct}%) → giảm mạnh so với cùng thời điểm hôm trước"
+            f"{format_kpi_alert_metric(fee_value, fee_pct, old, old_pct)}\n"
+            f"→ 1d giảm mạnh"
         )
 
     if free_pct >= 15:
@@ -2435,8 +2449,8 @@ def parse_kpi_ung360(body):
         old_pct = previous.get("free_percent", 0) if previous else 0
         alerts.append(
             f"Free:\n"
-            f"- Hiện tại: {free_value:,} ({free_pct}%)\n"
-            f"- Kỳ trước: {old:,} ({old_pct}%) → FREE tăng mạnh, cần theo dõi dịch chuyển service_type"
+            f"{format_kpi_alert_metric(free_value, free_pct, old, old_pct)}\n"
+            f"→ 1d tăng mạnh, cần theo dõi dịch chuyển service_type"
         )
 
     if loi_gui >= LOI_GUI_ALERT:
@@ -2444,33 +2458,34 @@ def parse_kpi_ung360(body):
         alerts.append(
             f"Gui Loi:\n"
             f"- Hiện tại: {loi_gui:,}\n"
-            f"- Kỳ trước: {old:,} → lỗi gửi tăng cao bất thường"
+            f"- 1h trước: {old:,}\n"
+            f"→ lỗi gửi tăng cao bất thường"
         )
 
         if previous:
             if ung_value == previous.get("ung_value", 0):
                 stale_lines.append(
-                    f"- Ung: {previous.get('ung_value', 0):,} -> {ung_value:,} → ứng tiền không đổi so với kỳ trước"
+                    f"- Ung: {previous.get('ung_value', 0):,} -> {ung_value:,} → không đổi so với 1h trước"
                 )
 
             if hoan_value == previous.get("hoan_value", 0):
                 stale_lines.append(
-                    f"- Hoan: {previous.get('hoan_value', 0):,} -> {hoan_value:,} → hoàn ứng không đổi so với kỳ trước"
+                    f"- Hoan: {previous.get('hoan_value', 0):,} -> {hoan_value:,} → không đổi so với 1h trước"
                 )
 
             if fee_value == previous.get("fee_value", 0):
                 stale_lines.append(
-                    f"- Fee: {previous.get('fee_value', 0):,} -> {fee_value:,} → FEE không đổi so với kỳ trước"
+                    f"- Fee: {previous.get('fee_value', 0):,} -> {fee_value:,} → không đổi so với 1h trước"
                 )
 
             if free_value == previous.get("free_value", 0):
                 stale_lines.append(
-                    f"- Free: {previous.get('free_value', 0):,} -> {free_value:,} → FREE không đổi so với kỳ trước"
+                    f"- Free: {previous.get('free_value', 0):,} -> {free_value:,} → không đổi so với 1h trước"
                 )
 
             if quota_value == previous.get("quota_value", 0):
                 stale_lines.append(
-                    f"- Quota: {previous.get('quota_value', 0):,} -> {quota_value:,} → QUOTA không đổi so với kỳ trước"
+                    f"- Quota: {previous.get('quota_value', 0):,} -> {quota_value:,} → không đổi so với 1h trước"
                 )
 
             if invite == previous.get("invite", 0):
@@ -2485,7 +2500,7 @@ def parse_kpi_ung360(body):
 
             if loi_gui == previous.get("loi_gui", 0):
                 stale_lines.append(
-                    f"- Loi Gui: {previous.get('loi_gui', 0):,} -> {loi_gui:,} → lỗi gửi không đổi so với kỳ trước"
+                    f"- Loi Gui: {previous.get('loi_gui', 0):,} -> {loi_gui:,} → không đổi so với 1h trước"
                 )
 
             if neif10 == previous.get("neif10", 0):
@@ -2508,7 +2523,7 @@ def parse_kpi_ung360(body):
             msg += "\n\n".join(alerts)
 
         if stale_lines:
-            msg += "\n\n * Chỉ số không thay đổi:\n"
+            msg += "\n\n * Chỉ số không thay đổi so với 1h trước:\n"
             msg += "\n".join(stale_lines)
 
         alert_key = f"kpi_{display_time}_{hash(msg)}"
@@ -2837,62 +2852,62 @@ def parse_same_period_report(body):
     if previous:
         if ung_value == previous.get("ung_value", 0):
             stale_lines.append(
-                f"- Ung: {previous.get('ung_value', 0):,} -> {ung_value:,} → không đổi so với giờ trước"
+                f"- Ung: {previous.get('ung_value', 0):,} -> {ung_value:,} → không đổi so với 1h trước"
             )
 
         if hoan_value == previous.get("hoan_value", 0):
             stale_lines.append(
-                f"- Hoan: {previous.get('hoan_value', 0):,} -> {hoan_value:,} → không đổi so với giờ trước"
+                f"- Hoan: {previous.get('hoan_value', 0):,} -> {hoan_value:,} → không đổi so với 1h trước"
             )
 
         if fee_value == previous.get("fee_value", 0):
             stale_lines.append(
-                f"- Fee: {previous.get('fee_value', 0):,} -> {fee_value:,} → không đổi so với giờ trước"
+                f"- Fee: {previous.get('fee_value', 0):,} -> {fee_value:,} → không đổi so với 1h trước"
             )
 
         if free_value == previous.get("free_value", 0):
             stale_lines.append(
-                f"- Free: {previous.get('free_value', 0):,} -> {free_value:,} → không đổi so với giờ trước"
+                f"- Free: {previous.get('free_value', 0):,} -> {free_value:,} → không đổi so với 1h trước"
             )
 
         if quota_value == previous.get("quota_value", 0):
             stale_lines.append(
-                f"- Quota: {previous.get('quota_value', 0):,} -> {quota_value:,} → không đổi so với giờ trước"
+                f"- Quota: {previous.get('quota_value', 0):,} -> {quota_value:,} → không đổi so với 1h trước"
             )
 
     if ung_pct <= -10:
         alerts.append(
             f"Ung:\n"
-            f"- Hiện tại: {ung_value:,} ({ung_pct}%)\n"
-            f"- Chênh lệch: {ung_diff:,} → ứng tiền giảm so với cùng kỳ"
+            f"{format_same_period_alert_metric(ung_value, ung_diff, ung_pct)}\n"
+            f"→ giảm so với 1d cùng kỳ"
         )
 
     if hoan_pct <= -5:
         alerts.append(
             f"Hoan:\n"
-            f"- Hiện tại: {hoan_value:,} ({hoan_pct}%)\n"
-            f"- Chênh lệch: {hoan_diff:,} → hoàn ứng giảm so với cùng kỳ"
+            f"{format_same_period_alert_metric(hoan_value, hoan_diff, hoan_pct)}\n"
+            f"→ giảm so với 1d cùng kỳ"
         )
 
     if fee_pct <= -10:
         alerts.append(
             f"Fee:\n"
-            f"- Hiện tại: {fee_value:,} ({fee_pct}%)\n"
-            f"- Chênh lệch: {fee_diff:,} → doanh thu ứng phí giảm so với cùng kỳ"
+            f"{format_same_period_alert_metric(fee_value, fee_diff, fee_pct)}\n"
+            f"→ doanh thu ứng phí giảm so với 1d cùng kỳ"
         )
 
     if free_pct >= 15:
         alerts.append(
             f"Free:\n"
-            f"- Hiện tại: {free_value:,} ({free_pct}%)\n"
-            f"- Chênh lệch: {free_diff:,} → FREE tăng mạnh so với cùng kỳ"
+            f"{format_same_period_alert_metric(free_value, free_diff, free_pct)}\n"
+            f"→ FREE tăng mạnh so với 1d cùng kỳ"
         )
 
     if abs(quota_pct) >= 50:
         alerts.append(
             f"Quota:\n"
-            f"- Hiện tại: {quota_value:,} ({quota_pct}%)\n"
-            f"- Chênh lệch: {quota_diff:,} → QUOTA biến động mạnh so với cùng kỳ"
+            f"{format_same_period_alert_metric(quota_value, quota_diff, quota_pct)}\n"
+            f"→ QUOTA biến động mạnh so với 1d cùng kỳ"
         )
 
     if alerts or stale_lines:
@@ -2909,7 +2924,7 @@ def parse_same_period_report(body):
             msg += "\n\n".join(alerts)
 
         if stale_lines:
-            msg += "\n\n* Chỉ số không đổi so với giờ trước:\n"
+            msg += "\n\n* Chỉ số không đổi so với 1h trước:\n"
             msg += "\n".join(stale_lines)
 
         send_alert(msg)
@@ -2978,9 +2993,9 @@ def parse_kafka_monitoring_mail(subject, body):
         topic, current, average, diff = count_match.groups()
         msg += "Kafka Message Count bất thường\n"
         msg += f"- Topic: {topic}\n"
-        msg += f"- Tổng giờ hiện tại: {current}\n"
-        msg += f"- TB 7 ngày cùng giờ: {average}\n"
-        msg += f"- Chênh lệch: {diff}\n"
+        msg += f"- 1h hiện tại: {current}\n"
+        msg += f"- TB 7d cùng giờ: {average}\n"
+        msg += f"- Chênh lệch so với TB 7d: {diff}\n"
 
     alert_key = f"kafka_{display_time}_{hash(msg)}"
     send_alert_once(alert_key, msg)
@@ -3372,7 +3387,7 @@ def check_missing_mail():
     if not has_received("same_period", period_key):
         alert_key = f"missing_same_{period_key}"
         if alert_key not in missing_alert_sent:
-            missing.append(f"- Doanh thu cùng kỳ kỳ {display_hour}")
+            missing.append(f"- Doanh thu cùng kỳ 1h {display_hour}")
             missing_alert_sent.add(alert_key)
 
     if not has_received("mds", period_key):
