@@ -804,10 +804,6 @@ def get_analysis_summary_text():
             f"({len(top_events)} lần, downtime {top_downtime} phút)."
         )
 
-    if insights:
-        lines.extend(["", "Nhận định:"])
-        lines.extend(f"- {item}" for item in insights)
-
     if kpi_rows:
         latest = kpi_rows[0]
         previous = kpi_rows[1] if len(kpi_rows) > 1 else None
@@ -918,6 +914,10 @@ def get_analysis_summary_text():
                 if event["downtime_minutes"] is not None:
                     event_line += f" | downtime {int(event['downtime_minutes'] or 0)} phút"
                 lines.append(event_line)
+
+    if insights:
+        lines.extend(["", "=======", "Phân tích:"])
+        lines.extend(f"- {item}" for item in insights)
 
     return "\n".join(lines)
 
