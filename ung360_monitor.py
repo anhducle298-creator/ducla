@@ -30,11 +30,11 @@ PASSWORD = os.getenv("UNG360_EMAIL_PASSWORD")
 IMAP_SERVER = "imap.gmail.com"
 
 POLL_INTERVAL = 600          # 10 phút
-HEARTBEAT_INTERVAL = 9000    # 2.5 giờ
 MAIL_SEARCH_LIMIT = 20
 
 DB_PATH = "data/ung360.db"
 PROCESSED_FILE = "data/processed_mails.json"
+MONITOR_STARTED_AT = None
 received_periods = set()
 missing_alert_sent = set()
 camera_pending = {}
@@ -297,8 +297,8 @@ def get_monitor_status_text():
     status_lines = [
         "* UNG360 Monitor Status",
         f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"Started at: {MONITOR_STARTED_AT.strftime('%Y-%m-%d %H:%M:%S') if MONITOR_STARTED_AT else 'N/A'}",
         f"Poll interval: {POLL_INTERVAL} seconds",
-        f"Heartbeat interval: {HEARTBEAT_INTERVAL} seconds",
         f"Received periods in memory: {len(received_periods)}",
         f"Camera pending: {len(camera_pending)}",
         f"AIBOX pending: {len(aibox_pending)}",
@@ -2686,12 +2686,14 @@ def check_camera_pending():
             camera_alerted[key] = True
             
 def main():
+    global MONITOR_STARTED_AT
+
     print("Ung360 monitor is running...")
 
+    MONITOR_STARTED_AT = datetime.now()
     init_db()
     start_telegram_bot()
     processed = load_processed_mails()
-    last_heartbeat = time.time()
 
     try:
         send_alert("------> Ung360 monitor started")
@@ -2700,13 +2702,6 @@ def main():
 
     while True:
         try:
-            if time.time() - last_heartbeat >= HEARTBEAT_INTERVAL:
-                try:
-                    send_alert("* UNG360 Monitor Alive")
-                except Exception as e:
-                    write_error_log(f"Heartbeat error: {e}")
-                last_heartbeat = time.time()
-
             print("Checking Gmail...")
 
             mail = imaplib.IMAP4_SSL(IMAP_SERVER)
