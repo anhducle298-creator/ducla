@@ -1892,6 +1892,7 @@ def is_aibox_mail(subject, body):
         "aibox mat ket noi" in text
         or "aibox da ket noi lai" in text
         or "aibox khoi phuc" in text
+        or "tong hop thay doi trang thai aibox" in text
         or "tai nguyen vuot nguong" in text
         or "tai nguyen khoi phuc" in text
         or "tai nguyen da khoi phuc" in text
@@ -1901,7 +1902,13 @@ def is_aibox_mail(subject, body):
 
 def is_aibox_down(subject, body):
     text = normalize_text(subject + "\n" + body)
-    return "aibox mat ket noi" in text
+    return (
+        "aibox mat ket noi" in text
+        or (
+            "tong hop thay doi trang thai aibox" in text
+            and "mat ket noi" in text
+        )
+    )
 
 
 def is_aibox_recovery(subject, body):
@@ -1909,6 +1916,13 @@ def is_aibox_recovery(subject, body):
     return (
         "aibox da ket noi lai" in text
         or "aibox khoi phuc" in text
+        or (
+            "tong hop thay doi trang thai aibox" in text
+            and (
+                "da ket noi lai" in text
+                or "khoi phuc" in text
+            )
+        )
     )
 
 
