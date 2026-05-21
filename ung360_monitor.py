@@ -3448,6 +3448,39 @@ def parse_aibox_mail(subject, body):
         except Exception:
             pass
 
+    recovery_check_match = re.search(
+        r'AIBOX:\s*(.+?)\s*\n\s*IP AIBOX:\s*(\d+\.\d+\.\d+\.\d+)',
+        body,
+        re.IGNORECASE | re.DOTALL
+    )
+    if is_aibox_recovery(subject, body) and recovery_check_match:
+        name = recovery_check_match.group(1).strip()
+        ip = recovery_check_match.group(2).strip()
+        key = f"{name}_{ip}"
+        down_time = aibox_pending.get(key, {}).get("down_time")
+        if not down_time:
+            down_time = get_open_device_event_time("AIBOX", name, "", ip)
+
+        downtime_minutes = None
+        if down_time:
+            downtime_minutes = int((event_time - down_time).total_seconds() / 60)
+        closed_downtime = close_open_device_event("AIBOX", name, "", ip, event_time)
+        if downtime_minutes is None:
+            downtime_minutes = closed_downtime
+
+        update_device_status("AIBOX", name, "", ip, "OK", "RECOVERY", down_time, event_time, downtime_minutes)
+        insert_device_event("AIBOX", name, "", ip, "RECOVERY", event_time, event_time, downtime_minutes, raw_text=body)
+        aibox_pending.pop(key, None)
+
+        msg = f"* AIBOX KHÔI PHỤC - {display_time}\n\n"
+        if downtime_minutes is None:
+            msg += f"- {name} - {ip}\n"
+        else:
+            msg += f"- {name} - {ip} | Downtime: {downtime_minutes} phút\n"
+        send_alert(msg)
+        print("AIBOX recovery check processed")
+        return
+
     if is_aibox_resource_alert(subject, body) or is_aibox_resource_recovery(subject, body):
         device = get_body_field(body, "Thiết bị") or "AIBOX"
         resource = get_body_field(body, "Tài nguyên") or "N/A"
