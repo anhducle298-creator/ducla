@@ -43,6 +43,7 @@ sent_alert_keys = set()
 camera_pending = {}
 camera_alerted = {}
 aibox_pending = {}
+mail_check_lock = threading.Lock()
 
 # ======================
 # ALERT RULES
@@ -273,6 +274,7 @@ def build_main_menu():
         telebot.types.KeyboardButton("Dự báo"),
         telebot.types.KeyboardButton("Thiết bị đang lỗi"),
         telebot.types.KeyboardButton("Log thiết bị"),
+        telebot.types.KeyboardButton("Cập nhật thông tin"),
         telebot.types.KeyboardButton("Cảnh báo gần nhất"),
         telebot.types.KeyboardButton("Kafka gần nhất"),
         telebot.types.KeyboardButton("Trạng thái"),
@@ -1093,6 +1095,7 @@ def handle_help(message):
         "/errors - Tổng lỗi từ đầu ngày và mã lỗi\n"
         "/devices - Thiết bị đang lỗi\n"
         "/devicelog - Log mất/kết nối lại thiết bị\n"
+        "/update - Đọc lại 50 email gần nhất\n"
         "/alerts - Cảnh báo gần nhất\n"
         "/kafka - Kafka monitoring gần nhất\n"
         "/alive - Kiểm tra bot còn chạy không\n"
@@ -1106,6 +1109,7 @@ def handle_help(message):
         "tổng lỗi hôm nay\n"
         "thiết bị đang lỗi\n"
         "log thiết bị\n"
+        "cập nhật thông tin\n"
         "cảnh báo gần nhất\n"
         "kafka gần nhất\n"
         "bot còn chạy không\n"
@@ -1161,6 +1165,31 @@ def handle_device_log(message):
         return
 
     send_bot_reply(message, get_device_event_log_text())
+
+
+@bot.message_handler(commands=["update", "capnhat"])
+def handle_update_info(message):
+    if not is_authorized_chat(message):
+        return
+
+    send_bot_reply(message, "Đang đọc lại 50 email gần nhất để cập nhật thông tin...")
+
+    def run_update():
+        try:
+            result = check_recent_mails(limit=50)
+            reply = (
+                "* Cập nhật thông tin xong\n"
+                f"Email đã kiểm tra: {result['checked']}\n"
+                f"Email mới xử lý: {result['processed']}\n"
+                f"Email đã bỏ qua: {result['skipped']}\n"
+                f"Email không nhận dạng: {result['ignored']}\n"
+            )
+            bot.send_message(message.chat.id, reply + "\n" + get_device_status_text())
+        except Exception as e:
+            write_error_log(f"Manual update failed: {e}")
+            bot.send_message(message.chat.id, f"Cập nhật thông tin thất bại: {e}")
+
+    threading.Thread(target=run_update, daemon=True).start()
 
 
 @bot.message_handler(commands=["alerts"])
@@ -1365,6 +1394,18 @@ def handle_unknown_message(message):
         "devicelog",
     }:
         handle_device_log(message)
+        return
+
+    if text in {
+        "cap nhat",
+        "cap nhat thong tin",
+        "update",
+        "update thong tin",
+        "doc lai mail",
+        "kiem tra lai mail",
+        "quet lai mail",
+    }:
+        handle_update_info(message)
         return
 
     if text in {
@@ -3681,6 +3722,83 @@ def process_mail(subject, body):
 
     return True
 
+
+def check_recent_mails(limit=MAIL_SEARCH_LIMIT):
+    with mail_check_lock:
+        processed = load_processed_mails()
+        result = {
+            "checked": 0,
+            "processed": 0,
+            "skipped": 0,
+            "ignored": 0,
+        }
+
+        mail = None
+        changed = False
+
+        try:
+            print("Checking Gmail...")
+
+            mail = imaplib.IMAP4_SSL(IMAP_SERVER)
+            mail.login(EMAIL, PASSWORD)
+            mail.select("inbox")
+
+            status, messages = mail.search(None, 'ALL')
+            if status != "OK" or not messages or not messages[0]:
+                return result
+
+            all_ids = messages[0].split()
+            mail_ids = all_ids[-limit:]
+            result["checked"] = len(mail_ids)
+
+            print("So mail gan nhat can kiem tra:", len(mail_ids))
+
+            for num in mail_ids:
+                _, data = mail.fetch(num, "(RFC822)")
+                raw_email = data[0][1]
+                msg = email.message_from_bytes(raw_email)
+
+                unique_id = get_mail_unique_id(msg, num)
+
+                if unique_id in processed:
+                    result["skipped"] += 1
+                    continue
+
+                subject = decode_mime_header(msg.get("subject", ""))
+                body = get_email_body(msg)
+
+                if not body:
+                    processed.add(unique_id)
+                    changed = True
+                    result["skipped"] += 1
+                    continue
+
+                print("Subject:", subject)
+                print(clean_mail_body(body))
+
+                if process_mail(subject, body):
+                    result["processed"] += 1
+                else:
+                    result["ignored"] += 1
+
+                processed.add(unique_id)
+                changed = True
+
+            if changed:
+                save_processed_mails(processed)
+            else:
+                print("Khong co mail moi can xu ly")
+
+            return result
+
+        finally:
+            if mail is not None:
+                try:
+                    mail.logout()
+                except Exception:
+                    pass
+
+
 def check_missing_mail():
     now = datetime.now()
 
@@ -3766,56 +3884,10 @@ def main():
     init_db()
     start_telegram_bot()
     notify_restart_completed_if_needed()
-    processed = load_processed_mails()
 
     while True:
         try:
-            print("Checking Gmail...")
-
-            mail = imaplib.IMAP4_SSL(IMAP_SERVER)
-            mail.login(EMAIL, PASSWORD)
-            mail.select("inbox")
-
-            status, messages = mail.search(None, 'ALL')
-            all_ids = messages[0].split()
-            mail_ids = all_ids[-MAIL_SEARCH_LIMIT:]
-
-            print("So mail gan nhat can kiem tra:", len(mail_ids))
-
-            changed = False
-
-            for num in mail_ids:
-                _, data = mail.fetch(num, "(RFC822)")
-                raw_email = data[0][1]
-                msg = email.message_from_bytes(raw_email)
-
-                unique_id = get_mail_unique_id(msg, num)
-
-                if unique_id in processed:
-                    continue
-
-                subject = decode_mime_header(msg.get("subject", ""))
-                body = get_email_body(msg)
-
-                if not body:
-                    processed.add(unique_id)
-                    changed = True
-                    continue
-
-                print("Subject:", subject)
-                print(clean_mail_body(body))
-
-                process_mail(subject, body)
-
-                processed.add(unique_id)
-                changed = True
-
-            if changed:
-                save_processed_mails(processed)
-            else:
-                print("Khong co mail moi can xu ly")
-
-            mail.logout()
+            check_recent_mails()
 
         except KeyboardInterrupt:
             print("Stopped by user")
