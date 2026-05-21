@@ -638,6 +638,12 @@ def format_same_period_alert_metric(value, diff, pct):
     )
 
 
+def format_same_period_summary(value, pct):
+    pct = int(pct or 0)
+    sign = "+" if pct > 0 else ""
+    return f"{int(value or 0):,} | so với 1d cùng kỳ {sign}{pct}%"
+
+
 def get_analysis_summary_text():
     if not os.path.exists(DB_PATH):
         return "Chưa có database để phân tích."
@@ -827,9 +833,9 @@ def get_analysis_summary_text():
             "",
             "Doanh thu cùng kỳ gần nhất:",
             f"- Kỳ: {same_period_row['time_range']}",
-            f"- Ung: {int(same_period_row['ung_value'] or 0):,} | 1d {int(same_period_row['ung_percent'] or 0)}%",
-            f"- Fee: {int(same_period_row['fee_value'] or 0):,} | 1d {int(same_period_row['fee_percent'] or 0)}%",
-            f"- Free: {int(same_period_row['free_value'] or 0):,} | 1d {int(same_period_row['free_percent'] or 0)}%",
+            f"- Ung: {format_same_period_summary(same_period_row['ung_value'], same_period_row['ung_percent'])}",
+            f"- Fee: {format_same_period_summary(same_period_row['fee_value'], same_period_row['fee_percent'])}",
+            f"- Free: {format_same_period_summary(same_period_row['free_value'], same_period_row['free_percent'])}",
         ])
 
     total_errors = 0
