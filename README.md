@@ -5,7 +5,7 @@ Thu muc tong de tach cac project rieng.
 ## Cau truc
 
 ```text
-my project/
+my_project/
   ung360/
     ung360_monitor.py
     start_monitor.bat
