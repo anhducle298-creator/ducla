@@ -27,7 +27,7 @@ central_monitor/
 ## Chay thu
 
 ```bash
-cd central_monitor
+cd "D:\ung360_monitor\my project\central_monitor"
 python app.py
 ```
 
