@@ -832,7 +832,7 @@ def get_analysis_summary_text():
         lines.extend([
             "",
             "Doanh thu cùng kỳ gần nhất:",
-            f"- Kỳ: {same_period_row['time_range']}",
+            f"- Khung giờ: {same_period_row['time_range']}",
             f"- Ung: {format_same_period_summary(same_period_row['ung_value'], same_period_row['ung_percent'])}",
             f"- Fee: {format_same_period_summary(same_period_row['fee_value'], same_period_row['fee_percent'])}",
             f"- Free: {format_same_period_summary(same_period_row['free_value'], same_period_row['free_percent'])}",
